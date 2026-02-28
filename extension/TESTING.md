@@ -26,6 +26,41 @@ Coverage output is written to `coverage/` as both an HTML report (`coverage/inde
 
 ---
 
+## Pre-Push Quality Gates (Husky)
+
+This repository uses [Husky](https://typicode.github.io/husky/) to enforce code quality before pushing to GitHub.
+
+### What Happens on `git push`
+
+When you run `git push origin main`, the `.husky/pre-push` hook automatically runs from the repository root:
+
+```bash
+cd extension
+npm run lint   # ESLint
+npm test       # Vitest
+```
+
+If **either linting or tests fail**, the push is blocked. You must fix the issues and try again.
+
+### To Bypass (Not Recommended)
+
+```bash
+# Force push without running hooks (use sparingly!)
+git push --no-verify origin main
+```
+
+### Tests Match Reality
+
+The test suite has been updated to test the **actual working implementation** (tab injection via `chrome.scripting.executeScript`). All **55 tests pass**:
+
+- `fleetedgeApi.test.js` (17 tests) — Tab injection, endpoint validation, error handling  
+- `taskPoller.test.js` (9 tests) — Poll cycles, VIN resolution, IST ↔ UTC conversion  
+- `backendApi.test.js` (7 tests) — Backend API calls, error codes, fire-and-forget logging  
+- `utils.test.js` (16 tests) — Pure functions: retries, time conversion, JWT parsing  
+- `logger.test.js` (6 tests) — Buffered logging, module names, limits  
+
+---
+
 ## Test Structure
 
 All test files live inside the module they test, under a `__tests__` directory:

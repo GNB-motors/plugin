@@ -2,6 +2,8 @@
 
 A Chrome Extension (Manifest V3) that passively captures FleetEdge authentication tokens from the user's browser session and uses them to fetch fuel consumption data on behalf of your backend. It replaces the Python/Playwright scraper entirely — no browser automation, no manual login scripts.
 
+**API Calls via Tab Injection:** To work around Chrome's service-worker security model, the extension injects `fetch()` calls directly into the open FleetEdge browser tab. This ensures requests carry the correct `Origin: fleetedge.home.tatamotors` header and full session cookies — bypassing 403 Forbidden errors.
+
 ---
 
 ## How It Works
@@ -12,21 +14,29 @@ A Chrome Extension (Manifest V3) that passively captures FleetEdge authenticatio
 ┌──────────────────────────────────────────────────────────────────────────┐
 │                            USER'S BROWSER                                │
 │                                                                          │
-│  1. User logs into FleetEdge normally                                    │
+│  1. User logs into FleetEdge normally (tab stays open)                   │
 │  2. Extension intercepts the Bearer token from network requests          │
 │  3. Every 5 min, extension polls YOUR backend for pending tasks          │
-│  4. For each task, extension calls FleetEdge APIs with the captured      │
-│     token, fetches fuel consumption data                                 │
-│  5. Extension sends the results back to YOUR backend                     │
+│  4. For each task:                                                       │
+│     - Extension injects fetch() INTO the FleetEdge tab via              │
+│       chrome.scripting.executeScript                                     │
+│     - Fetch calls FleetEdge APIs FROM the tab (Origin correct)           │
+│     - Results returned to extension service worker                       │
+│  5. Extension POSTs results back to YOUR backend                         │
 │                                                                          │
 │  ┌─────────────┐    Token    ┌──────────────────┐   Data   ┌──────────┐ │
-│  │  FleetEdge  │ ──────────► │    Extension      │ ◄──────► │ Backend  │ │
-│  │  Website    │             │  (service worker) │ ────────►│  Server  │ │
-│  └─────────────┘             └──────────────────┘  Results  └──────────┘ │
+│  │  FleetEdge  │ ◄────────── │    Extension      │ ◄──────► │ Backend  │ │
+│  │  Website    │ (injection) │  (service worker) │ ────────►│  Server  │ │
+│  │  (tab)      │             │                  │ Results  └──────────┘ │
+│  └─────────────┘             └──────────────────┘                       │
 └──────────────────────────────────────────────────────────────────────────┘
 ```
 
-**Key point:** The FleetEdge token never leaves the browser. Only fuel consumption results are sent to your backend.
+**Key points:**
+- The FleetEdge token never leaves the browser
+- Only fuel consumption results are sent to your backend
+- **The FleetEdge tab must stay open** in the browser for the extension to work
+- Requests injected into the tab appear as legitimate FleetEdge portal requests
 
 ### Step-by-Step Detail
 
@@ -34,17 +44,19 @@ A Chrome Extension (Manifest V3) that passively captures FleetEdge authenticatio
 
 2. **Task Polling** — A Chrome alarm fires every N minutes (default 5). The extension calls `GET /tasks/pending` on your backend to get a list of vehicles + time ranges that need fuel data.
 
-3. **VIN Resolution** — Your backend sends vehicle registration numbers (e.g. `MH12AB1234`). FleetEdge APIs need VINs. The extension calls FleetEdge's `/get-vehicles` endpoint, builds a `registration → VIN` map, and caches it for 24 hours.
+3. **Tab Injection** — All FleetEdge API calls use `chrome.scripting.executeScript` to run inside the open FleetEdge browser tab. This bypasses Chrome's restriction on service-worker Origin headers.
 
-4. **Time Conversion** — Your backend sends times in IST. FleetEdge APIs need UTC. The extension supports two modes:
+4. **VIN Resolution** — Your backend sends vehicle registration numbers (e.g. `MH12AB1234`). FleetEdge APIs need VINs. The extension calls FleetEdge's `/get-vin-for-dashboard` endpoint (injected into the tab), builds a `registration → VIN` map, and caches it for 24 hours.
+
+5. **Time Conversion** — Your backend sends times in IST. FleetEdge APIs need UTC. The extension supports two modes:
    - **Explicit range** (recommended): send `from_date`, `from_time`, `to_date`, `to_time` — the extension converts each endpoint from IST to UTC directly.
    - **Point-in-time** (legacy): send `refuel_date`, `refuel_time` — the extension auto-builds a ±30 minute window around that point.
 
-5. **Fuel Data Fetch** — For each task, the extension calls FleetEdge's `/analyse-fuel-consumption` endpoint with the VIN and UTC time window.
+6. **Fuel Data Fetch** — For each task, the extension calls FleetEdge's `/analyse-fuel-consumption` endpoint (injected into the tab) with the VIN and UTC time window, plus `is_testing: true` and `data_count: 100` flags.
 
-6. **Result Submission** — Results are POSTed back to your backend at `POST /tasks/:taskId/result`. If a task fails (VIN not found, API error, etc.), the error is reported to `POST /tasks/:taskId/error`.
+7. **Result Submission** — Results are POSTed back to your backend at `POST /tasks/:taskId/result`. If a task fails (VIN not found, API error, etc.), the error is reported to `POST /tasks/:taskId/error`.
 
-7. **Manual Query** — Users can also fetch fuel data manually from the popup UI by entering a vehicle number/VIN and a date-time range. These results are sent to your backend at `POST /fuel-data/ingest`.
+8. **Manual Query** — Users can also fetch fuel data manually from the popup UI by entering a vehicle number/VIN and a date-time range. These results are sent to your backend at `POST /fuel-data/ingest`.
 
 ---
 

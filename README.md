@@ -2,7 +2,7 @@
 
 A Chrome Extension (Manifest V3) that **passively captures FleetEdge authentication tokens** from the user's browser session and uses them to fetch fuel-consumption data on behalf of your backend.
 It replaces browser automation scrapers — **no Playwright**, **no headless logins** — the extension does the API calls from the logged-in user’s browser and **only** sends aggregated results to your server.
-
+**API Calls via Tab Injection:** To bypass Chrome's service-worker Origin restrictions, the extension injects `fetch()` calls directly into the open FleetEdge browser tab using `chrome.scripting.executeScript`. This ensures requests carry the correct `Origin` and `Referer` headers plus full session cookies — appearing as legitimate FleetEdge portal requests.
 ---
 
 ## Key ideas 🧠
@@ -55,12 +55,14 @@ sequenceDiagram
 # Table of contents 📚
 
 * [Installation](#installation-)
+* [API Architecture (Tab Injection)](#api-architecture-tab-injection-)
 * [First-time setup](#first-time-setup-)
 * [Backend integration (required endpoints)](#backend-integration-required-endpoints-)
 * [CORS configuration](#cors-configuration-)
 * [Database suggestions](#suggested-database-schema-mongodb-)
 * [Environment variables](#environment-variables-)
 * [Development](#development-)
+* [Testing & Quality Gates](#testing--quality-gates-)
 * [Troubleshooting](#troubleshooting-)
 * [Security & privacy](#security--privacy-)
 * [Contributing & license](#contributing--license-)
@@ -86,10 +88,68 @@ Load in Chrome:
 For dev (hot reload popup):
 
 ```bash
+cd extension
 npm run dev
 ```
 
 Load the extension pointing at the project root (not `dist/`) when using `npm run dev`. Background service worker changes require refreshing the extension in `chrome://extensions/`.
+
+---
+
+# API Architecture (Tab Injection) 🔌
+
+## The Problem: Why Tab Injection?
+
+Chrome's Manifest V3 service workers **cannot spoof the `Origin` header**. When the FleetEdge extension service worker makes a direct fetch to FleetEdge's API, Chrome sets `Origin: chrome-extension://[extension-id]`, which FleetEdge rejects with a 403 Forbidden.
+
+## The Solution: Execute Fetch Inside the Browser Tab
+
+The extension uses **`chrome.scripting.executeScript`** to inject and run the fetch call *inside* the open FleetEdge browser tab, not from the service worker. This means:
+
+- The request originates from `https://fleetedge.home.tatamotors`, so `Origin` is correct
+- The browser's full session cookie jar is available via `credentials: 'include'`
+- The fetch returns real FleetEdge API responses without 403 errors
+
+### Code Flow
+
+```javascript
+// In service worker (extension/src/background/fleetedgeApi.js)
+async function fleetFetch(path, token, body) {
+  const tab = await getFleetEdgeTab(); // Must have FleetEdge tab open
+  const results = await chrome.scripting.executeScript({
+    target: { tabId: tab.id },
+    func: async (fetchUrl, bearerToken, requestBody) => {
+      // This func runs INSIDE the FleetEdge tab
+      const res = await fetch(fetchUrl, {
+        method: 'POST',
+        headers: { 'Authorization': `Bearer ${bearerToken}` },
+        credentials: 'include', // Use browser's session cookies
+        body: JSON.stringify(requestBody),
+      });
+      return { ok: res.ok, status: res.status, text: await res.text() };
+    },
+    args: [url, token, body],
+  });
+  // Parse and return result from the tab
+}
+```
+
+### Required Permissions
+
+The [manifest.json](extension/manifest.json) includes:
+
+```json
+"permissions": ["webRequest", "storage", "alarms", "notifications", "scripting", "tabs"]
+```
+
+- `scripting` — inject scripts into pages
+- `tabs` — query for open FleetEdge tabs
+
+### User Experience
+
+- **FleetEdge tab must stay open** in the browser (can be in background/hidden)
+- If user closes the FleetEdge tab, the extension cannot poll or fetch data
+- Extension popups alert users to "Keep FleetEdge open in a tab" if it detects no tab
 
 ---
 
