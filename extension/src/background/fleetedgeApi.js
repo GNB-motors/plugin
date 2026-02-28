@@ -4,47 +4,80 @@ import { createLogger } from './logger.js';
 
 const logger = createLogger('FleetEdgeAPI');
 
-function buildHeaders(token) {
-  return {
-    'Authorization': `Bearer ${token}`,
-    'Content-Type': 'application/json',
-    'Origin': config.FLEETEDGE_ORIGIN,
-  };
+/**
+ * Find an open FleetEdge tab (must exist for the session cookies + correct Origin to work).
+ * The FleetEdge API rejects requests that don't originate from fleetedge.home.tatamotors —
+ * Chrome's security prevents service workers from spoofing the Origin header, so we
+ * inject the fetch() call into the live FleetEdge tab instead.
+ */
+async function getFleetEdgeTab() {
+  const tabs = await chrome.tabs.query({ url: 'https://fleetedge.home.tatamotors/*' });
+  if (!tabs.length) {
+    throw new ApiError('No FleetEdge tab open — please keep the FleetEdge website open in Chrome', 0);
+  }
+  return tabs[0];
 }
 
+/**
+ * Execute a POST fetch inside the FleetEdge tab so the request carries the correct
+ * Origin (https://fleetedge.home.tatamotors) and session cookies automatically.
+ */
 async function fleetFetch(path, token, body) {
+  const tab = await getFleetEdgeTab();
   const url = `${config.CVP_API_BASE}${path}`;
 
-  const response = await fetch(url, {
-    method: 'POST',
-    headers: buildHeaders(token),
-    body: JSON.stringify(body),
+  const results = await chrome.scripting.executeScript({
+    target: { tabId: tab.id },
+    func: async (fetchUrl, bearerToken, requestBody) => {
+      try {
+        const res = await fetch(fetchUrl, {
+          method: 'POST',
+          headers: {
+            'Authorization': `Bearer ${bearerToken}`,
+            'Content-Type': 'application/json',
+            'User-Agent': 'Mozilla/5.0',
+          },
+          credentials: 'include',
+          body: JSON.stringify(requestBody),
+        });
+        const text = await res.text();
+        return { ok: res.ok, status: res.status, text };
+      } catch (err) {
+        return { ok: false, status: 0, text: err.message };
+      }
+    },
+    args: [url, token, body],
   });
 
-  if (response.status === 401) throw new ApiError('Session expired', 401);
-  if (response.status === 403) throw new ApiError('Forbidden', 403);
+  const result = results?.[0]?.result;
+  if (!result) throw new ApiError('Script injection returned no result', 0);
 
-  if (!response.ok) {
-    const text = await response.text().catch(() => '');
-    throw new ApiError(`${path} failed: ${response.status} ${text.slice(0, 200)}`, response.status);
+  if (result.status === 401) throw new ApiError('Session expired', 401);
+  if (result.status === 403) throw new ApiError('Forbidden — token may have expired, re-open FleetEdge', 403);
+  if (!result.ok) throw new ApiError(`${path} failed: ${result.status} ${result.text.slice(0, 200)}`, result.status);
+
+  try {
+    return JSON.parse(result.text);
+  } catch {
+    throw new ApiError(`Invalid JSON response from ${path}`, 0);
   }
-
-  return response.json();
 }
 
 export async function fetchVehicles(token, fleetId) {
   logger.info(`Fetching vehicles for fleet: ${fleetId}`);
 
+  // get-vin-for-dashboard is what FleetEdge actually uses for the vehicle list.
+  // Returns: { status: 0, result: [{ vin, vehicle_id, type_of_vehicle, registration_number, ... }] }
   const data = await withRetry(
-    () => fleetFetch('/api/vehicle-service/get-vehicles', token, {
+    () => fleetFetch('/api/vehicle-service/get-vin-for-dashboard', token, {
       fleet_id: fleetId,
-      page_number: 1,
-      page_size: 5000,
+      req_by: 'PORTALS',
     }),
     'fetchVehicles'
   );
 
-  const results = data.results || [];
+  // Response uses `result` (singular), not `results`
+  const results = data.result || data.results || [];
   logger.info(`Fetched ${results.length} vehicles`);
   return results;
 }
@@ -63,10 +96,10 @@ export async function fetchFuelConsumption(token, fleetId, vins, fromDatetime, t
       to_datetime: toDatetime,
       vins,
       is_report: true,
-      data_count: 50,
+      is_testing: true,
+      data_count: 100,
       is_tipper: false,
-      locale: 'en',
-      req_by: 'PLUGIN',
+      req_by: 'PORTALS',
     }),
     'fetchFuelConsumption'
   );

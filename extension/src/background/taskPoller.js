@@ -199,10 +199,17 @@ async function getOrRefreshVinMap(token, fleetId) {
   logger.info('VIN map cache expired or missing, refreshing from FleetEdge...');
   const vehicles = await fetchVehicles(token, fleetId);
 
+  // Log first vehicle's keys so we know exactly what fields the API returns
+  if (vehicles.length > 0) {
+    logger.debug(`Vehicle fields: ${Object.keys(vehicles[0]).join(', ')}`);
+  }
+
   const vinMap = {};
   for (const v of vehicles) {
-    if (v.registration_number && v.vin) {
-      const key = normalizeRegistration(v.registration_number);
+    // FleetEdge may use registration_number, regn_number, reg_no, or vehicle_reg
+    const reg = v.registration_number || v.regn_number || v.reg_no || v.vehicle_reg;
+    if (reg && v.vin) {
+      const key = normalizeRegistration(reg);
       vinMap[key] = v.vin;
     }
   }

@@ -242,7 +242,7 @@ function Popup() {
     flash('Refreshing vehicles...');
     try {
       const res = await chrome.runtime.sendMessage({ type: 'REFRESH_VEHICLES' });
-      flash(res.success ? `Loaded ${res.count} vehicles ✓` : 'No valid token');
+      flash(res.success ? `Loaded ${res.count} vehicles ✓` : (res.error || 'No valid token'));
       refreshStatus();
     } catch (err) {
       flash(`Error: ${err.message}`);

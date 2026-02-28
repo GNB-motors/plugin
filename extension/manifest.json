@@ -7,7 +7,9 @@
     "webRequest",
     "storage",
     "alarms",
-    "notifications"
+    "notifications",
+    "scripting",
+    "tabs"
   ],
   "host_permissions": [
     "https://cvp.api.tatamotors/*",

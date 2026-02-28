@@ -1,124 +1,209 @@
 /**
  * Unit tests for src/background/fleetedgeApi.js
  *
- * Mocks: fetch (global), config, logger, utils.withRetry (pass-through).
+ * fleetedgeApi.js injects fetch() calls into the open FleetEdge browser tab via
+ * chrome.scripting.executeScript so the request carries the correct Origin and
+ * session cookies automatically (Chrome service workers cannot spoof Origin).
+ *
+ * These tests mock chrome.tabs.query + chrome.scripting.executeScript instead of
+ * global fetch.
  */
 import { describe, it, expect, vi, beforeEach } from 'vitest';
 
-// ─── Chrome stub ─────────────────────────────────────────────────────────────
-vi.stubGlobal('chrome', {
-  storage: {
-    local: {
-      get: vi.fn(() => Promise.resolve({})),
-      set: vi.fn(() => Promise.resolve()),
-    },
-  },
-});
-
-// ─── Module mocks ────────────────────────────────────────────────────────────
-vi.mock('../config.js', () => ({
-  config: {
-    CVP_API_BASE: 'https://cvp.api.tatamotors',
-    FLEETEDGE_ORIGIN: 'https://fleetedge.home.tatamotors',
-    MAX_RETRY_ATTEMPTS: 1,
-  },
-}));
-
+// ─── Module mocks (must be before the import of the module under test) ────────
 vi.mock('../logger.js', () => ({
   createLogger: () => ({ info: vi.fn(), warn: vi.fn(), error: vi.fn(), debug: vi.fn() }),
 }));
 
+vi.mock('../config.js', () => ({
+  config: { CVP_API_BASE: 'https://cvp.api.tatamotors' },
+}));
+
 // Make withRetry a transparent pass-through so we isolate fleetedgeApi logic
-vi.mock('../utils.js', async (importOriginal) => {
-  const real = await importOriginal();
-  return { ...real, withRetry: (fn) => fn() };
+vi.mock('../utils.js', () => ({
+  withRetry: vi.fn((fn) => fn()),
+}));
+
+// ─── Chrome stub (tabs + scripting) ──────────────────────────────────────────
+const mockTabsQuery    = vi.fn();
+const mockExecuteScript = vi.fn();
+
+vi.stubGlobal('chrome', {
+  tabs:      { query: mockTabsQuery },
+  scripting: { executeScript: mockExecuteScript },
+  storage:   { local: { get: vi.fn(() => Promise.resolve({})), set: vi.fn() } },
 });
 
 const { fetchVehicles, fetchFuelConsumption, ApiError } = await import('../fleetedgeApi.js');
 
-// ─── Helpers ─────────────────────────────────────────────────────────────────
-function mockFetch(status, body) {
-  const json = typeof body === 'string' ? body : JSON.stringify(body);
-  vi.stubGlobal('fetch', vi.fn().mockResolvedValue({
-    ok: status >= 200 && status < 300,
-    status,
-    json: () => Promise.resolve(body),
-    text: () => Promise.resolve(json),
-  }));
+// ─── Helpers ──────────────────────────────────────────────────────────────────
+/** Build a resolved executeScript return value for a successful JSON response. */
+function scriptOk(data) {
+  return [{ result: { ok: true, status: 200, text: JSON.stringify(data) } }];
 }
 
-beforeEach(() => { vi.restoreAllMocks(); });
+/** Build a resolved executeScript return value for a failed response. */
+function scriptErr(status, text = '') {
+  return [{ result: { ok: false, status, text } }];
+}
+
+const TAB_ID      = 42;
+const TOKEN       = 'test-token-123';
+const FLEET_ID    = 'fleet-001';
+
+beforeEach(() => {
+  vi.clearAllMocks();
+  // Default: one open FleetEdge tab
+  mockTabsQuery.mockResolvedValue([{ id: TAB_ID }]);
+});
 
 // ─── fetchVehicles ────────────────────────────────────────────────────────────
 describe('fetchVehicles', () => {
-  it('returns the results array on a 200 response', async () => {
-    const vehicles = [{ vin: 'ABC123', registration: 'WB01A0001' }];
-    mockFetch(200, { results: vehicles });
+  it('returns vehicles from the result (singular) field', async () => {
+    const vehicles = [
+      { vin: 'VIN001', registration_number: 'WB25R9640' },
+      { vin: 'VIN002', registration_number: 'MH12AB1234' },
+    ];
+    mockExecuteScript.mockResolvedValue(scriptOk({ result: vehicles }));
 
-    const result = await fetchVehicles('token-abc', 'fleet-1');
-    expect(result).toEqual(vehicles);
+    const out = await fetchVehicles(TOKEN, FLEET_ID);
+    expect(out).toEqual(vehicles);
   });
 
-  it('returns empty array when results field is absent', async () => {
-    mockFetch(200, {});
-    const result = await fetchVehicles('token', 'fleet');
-    expect(result).toEqual([]);
+  it('falls back to results (plural) field when result is absent', async () => {
+    const vehicles = [{ vin: 'VINX', registration_number: 'DL1AB0001' }];
+    mockExecuteScript.mockResolvedValue(scriptOk({ results: vehicles }));
+
+    const out = await fetchVehicles(TOKEN, FLEET_ID);
+    expect(out).toEqual(vehicles);
   });
 
-  it('throws ApiError with status 401 on unauthorised response', async () => {
-    mockFetch(401, {});
-    await expect(fetchVehicles('bad-token', 'fleet')).rejects.toThrow(ApiError);
-    await expect(fetchVehicles('bad-token', 'fleet')).rejects.toMatchObject({ status: 401 });
+  it('returns empty array when both result and results are absent', async () => {
+    mockExecuteScript.mockResolvedValue(scriptOk({ status: 0 }));
+    const out = await fetchVehicles(TOKEN, FLEET_ID);
+    expect(out).toEqual([]);
   });
 
-  it('throws ApiError on generic server error', async () => {
-    mockFetch(500, 'Internal Server Error');
-    await expect(fetchVehicles('token', 'fleet')).rejects.toThrow(ApiError);
+  it('calls get-vin-for-dashboard endpoint with fleet_id and req_by: PORTALS', async () => {
+    mockExecuteScript.mockResolvedValue(scriptOk({ result: [] }));
+
+    await fetchVehicles(TOKEN, FLEET_ID);
+
+    const scriptCall = mockExecuteScript.mock.calls[0][0];
+    const [url, token, body] = scriptCall.args;
+    expect(url).toContain('/api/vehicle-service/get-vin-for-dashboard');
+    expect(token).toBe(TOKEN);
+    expect(body).toMatchObject({ fleet_id: FLEET_ID, req_by: 'PORTALS' });
   });
 
-  it('calls fetch with the correct URL and Authorization header', async () => {
-    mockFetch(200, { results: [] });
-    await fetchVehicles('my-token', 'fleet-42');
-    const [url, opts] = vi.mocked(fetch).mock.calls[0];
-    expect(url).toContain('/get-vehicles');
-    expect(opts.headers['Authorization']).toBe('Bearer my-token');
+  it('targets the correct tab id returned by tabs.query', async () => {
+    mockTabsQuery.mockResolvedValue([{ id: 99 }]);
+    mockExecuteScript.mockResolvedValue(scriptOk({ result: [] }));
+
+    await fetchVehicles(TOKEN, FLEET_ID);
+
+    const scriptCall = mockExecuteScript.mock.calls[0][0];
+    expect(scriptCall.target.tabId).toBe(99);
+  });
+
+  it('throws ApiError(0) when no FleetEdge tab is open', async () => {
+    mockTabsQuery.mockResolvedValue([]);
+    await expect(fetchVehicles(TOKEN, FLEET_ID))
+      .rejects.toMatchObject({ name: 'ApiError', status: 0 });
+  });
+
+  it('throws ApiError(401) on session expiry', async () => {
+    mockExecuteScript.mockResolvedValue(scriptErr(401));
+    await expect(fetchVehicles(TOKEN, FLEET_ID))
+      .rejects.toMatchObject({ name: 'ApiError', status: 401 });
+  });
+
+  it('throws ApiError(403) on forbidden response', async () => {
+    mockExecuteScript.mockResolvedValue(scriptErr(403));
+    await expect(fetchVehicles(TOKEN, FLEET_ID))
+      .rejects.toMatchObject({ name: 'ApiError', status: 403 });
+  });
+
+  it('throws ApiError on 500 server error', async () => {
+    mockExecuteScript.mockResolvedValue(scriptErr(500, 'Internal Server Error'));
+    await expect(fetchVehicles(TOKEN, FLEET_ID))
+      .rejects.toMatchObject({ name: 'ApiError', status: 500 });
+  });
+
+  it('throws ApiError(0) on invalid JSON response', async () => {
+    mockExecuteScript.mockResolvedValue([{ result: { ok: true, status: 200, text: 'not-json{{' } }]);
+    await expect(fetchVehicles(TOKEN, FLEET_ID))
+      .rejects.toMatchObject({ name: 'ApiError', status: 0 });
+  });
+
+  it('throws ApiError(0) when executeScript returns no result object', async () => {
+    mockExecuteScript.mockResolvedValue([{}]);
+    await expect(fetchVehicles(TOKEN, FLEET_ID))
+      .rejects.toMatchObject({ name: 'ApiError', status: 0 });
   });
 });
 
 // ─── fetchFuelConsumption ─────────────────────────────────────────────────────
 describe('fetchFuelConsumption', () => {
-  const FROM = '2026-02-13T21:50:00.000Z';
-  const TO   = '2026-02-18T09:20:00.000Z';
   const VINS = ['MAT828113S2C05629'];
+  const FROM = '2026-02-13T21:50:00.000';
+  const TO   = '2026-02-18T09:20:00.000';
 
   it('returns the full data object on success', async () => {
-    const data = { results: [{ vin: VINS[0], fuel_used: 45.2 }] };
-    mockFetch(200, data);
+    const data = { results: [{ vin: VINS[0], fuel_used: 363.2, distance_travelled: 1030.6 }] };
+    mockExecuteScript.mockResolvedValue(scriptOk(data));
 
-    const result = await fetchFuelConsumption('token', 'fleet', VINS, FROM, TO);
-    expect(result).toEqual(data);
-    expect(result.results).toHaveLength(1);
+    const out = await fetchFuelConsumption(TOKEN, FLEET_ID, VINS, FROM, TO);
+    expect(out).toEqual(data);
   });
 
-  it('returns data with empty results array when none found', async () => {
-    mockFetch(200, { results: [] });
-    const result = await fetchFuelConsumption('token', 'fleet', VINS, FROM, TO);
-    expect(result.results).toEqual([]);
+  it('calls analyse-fuel-consumption with all required fields', async () => {
+    mockExecuteScript.mockResolvedValue(scriptOk({ results: [] }));
+
+    await fetchFuelConsumption(TOKEN, FLEET_ID, VINS, FROM, TO);
+
+    const scriptCall = mockExecuteScript.mock.calls[0][0];
+    const [url, token, body] = scriptCall.args;
+    expect(url).toContain('/api/vehicle-service/analyse-fuel-consumption');
+    expect(token).toBe(TOKEN);
+    expect(body).toMatchObject({
+      fleet_id:      FLEET_ID,
+      vins:          VINS,
+      from_datetime: FROM,
+      to_datetime:   TO,
+      is_testing:    true,
+      data_count:    100,
+      req_by:        'PORTALS',
+      is_report:     true,
+    });
   });
 
-  it('throws ApiError on 401', async () => {
-    mockFetch(401, {});
-    await expect(fetchFuelConsumption('token', 'fleet', VINS, FROM, TO))
-      .rejects.toMatchObject({ status: 401 });
+  it('throws ApiError(401) on session expiry', async () => {
+    mockExecuteScript.mockResolvedValue(scriptErr(401));
+    await expect(fetchFuelConsumption(TOKEN, FLEET_ID, VINS, FROM, TO))
+      .rejects.toMatchObject({ name: 'ApiError', status: 401 });
   });
 
-  it('sends from_datetime and to_datetime in the request body', async () => {
-    mockFetch(200, { results: [] });
-    await fetchFuelConsumption('token', 'fleet', VINS, FROM, TO);
-    const [, opts] = vi.mocked(fetch).mock.calls[0];
-    const body = JSON.parse(opts.body);
-    expect(body.from_datetime).toBe(FROM);
-    expect(body.to_datetime).toBe(TO);
-    expect(body.vins).toEqual(VINS);
+  it('throws ApiError(403) on forbidden response', async () => {
+    mockExecuteScript.mockResolvedValue(scriptErr(403));
+    await expect(fetchFuelConsumption(TOKEN, FLEET_ID, VINS, FROM, TO))
+      .rejects.toMatchObject({ name: 'ApiError', status: 403 });
+  });
+
+  it('throws ApiError(0) when no FleetEdge tab is open', async () => {
+    mockTabsQuery.mockResolvedValue([]);
+    await expect(fetchFuelConsumption(TOKEN, FLEET_ID, VINS, FROM, TO))
+      .rejects.toMatchObject({ name: 'ApiError', status: 0 });
+  });
+});
+
+// ─── ApiError ─────────────────────────────────────────────────────────────────
+describe('ApiError', () => {
+  it('is an Error subclass with name ApiError and a status property', () => {
+    const err = new ApiError('something went wrong', 404);
+    expect(err).toBeInstanceOf(Error);
+    expect(err.name).toBe('ApiError');
+    expect(err.status).toBe(404);
+    expect(err.message).toBe('something went wrong');
   });
 });

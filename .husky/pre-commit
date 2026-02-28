@@ -1,0 +1,2 @@
+cd extension
+npm run lint

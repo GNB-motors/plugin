@@ -105,8 +105,14 @@ async function handleMessage(message) {
     }
 
     case 'REFRESH_VEHICLES': {
-      const map = await forceRefreshVinMap();
-      return { success: !!map, count: map ? Object.keys(map).length : 0 };
+      try {
+        const map = await forceRefreshVinMap();
+        if (!map) return { success: false, error: 'No valid FleetEdge token — log in to FleetEdge first' };
+        return { success: true, count: Object.keys(map).length };
+      } catch (err) {
+        logger.error('Vehicle refresh failed', err.message);
+        return { success: false, error: err.message };
+      }
     }
 
     case 'GET_LOGS': {
