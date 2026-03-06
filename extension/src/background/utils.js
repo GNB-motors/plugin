@@ -104,7 +104,7 @@ export function removeStorage(keys) {
 }
 
 export function normalizeRegistration(reg) {
-  return (reg || '').replace(/[\s-]/g, '').toUpperCase();
+  return (reg || '').replace(/[^a-zA-Z0-9]/g, '').toUpperCase();
 }
 
 /**
@@ -115,7 +115,7 @@ export function normalizeRegistration(reg) {
  */
 export function checkTokenExpiry(payload, bufferSeconds = 60) {
   const exp = payload?.exp;
-  if (!exp) return { valid: false, remainingSeconds: 0 };
+  if (!exp || typeof exp !== 'number' || !Number.isFinite(exp)) return { valid: false, remainingSeconds: 0 };
   const now = Math.floor(Date.now() / 1000);
   const remaining = exp - now;
   if (remaining <= bufferSeconds) return { valid: false, remainingSeconds: Math.max(0, remaining) };

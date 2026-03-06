@@ -207,3 +207,42 @@ describe('ApiError', () => {
     expect(err.message).toBe('something went wrong');
   });
 });
+
+// ═══════════════════════════════════════════════════════════════════════════════
+// Edge Cases — ⚠️ DO NOT SKIP
+// FleetEdge tab injection is fragile. Users routinely have multiple FleetEdge
+// tabs open. If the code picks the wrong tab, cookies/Origin don't match and
+// every FleetEdge API call silently returns garbage or 403.
+// ═══════════════════════════════════════════════════════════════════════════════
+
+describe('Edge Cases', () => {
+  // WHY THIS MATTERS: Users open 3-4 FleetEdge tabs (dashboard, reports, alerts).
+  // Chrome's tabs.query returns all of them. The code must consistently use tabs[0]
+  // — switching tabs mid-batch corrupts session cookies and triggers 403 errors.
+  it('multiple FleetEdge tabs: always targets the first tab', async () => {
+    mockTabsQuery.mockResolvedValue([{ id: 10 }, { id: 20 }, { id: 30 }]);
+    mockExecuteScript.mockResolvedValue(scriptOk({ result: [] }));
+
+    await fetchVehicles(TOKEN, FLEET_ID);
+
+    const scriptCall = mockExecuteScript.mock.calls[0][0];
+    expect(scriptCall.target.tabId).toBe(10);
+  });
+
+  // WHY THIS MATTERS: If executeScript injection returns [{ result: null }]
+  // (e.g., tab crashed or navigated away mid-request), the code must throw
+  // ApiError — not silently return undefined and corrupt downstream parsing.
+  it('executeScript returning null result throws ApiError', async () => {
+    mockExecuteScript.mockResolvedValue([{ result: null }]);
+    await expect(fetchVehicles(TOKEN, FLEET_ID))
+      .rejects.toMatchObject({ name: 'ApiError', status: 0 });
+  });
+
+  // WHY THIS MATTERS: executeScript returning an empty array (rare Chrome bug on
+  // extension updates) must not crash with "Cannot read properties of undefined".
+  it('executeScript returning empty array throws ApiError', async () => {
+    mockExecuteScript.mockResolvedValue([]);
+    await expect(fetchVehicles(TOKEN, FLEET_ID))
+      .rejects.toMatchObject({ name: 'ApiError', status: 0 });
+  });
+});

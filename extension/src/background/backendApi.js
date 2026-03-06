@@ -59,14 +59,19 @@ export async function login(emailOrMobile, password) {
   }
 
   const data = await response.json();
-  const { token, user } = data.data;
+  const token = data.data?.token;
+  const user = data.data?.user;
+
+  if (!token) {
+    throw new Error('Login failed: server response missing token');
+  }
 
   await setStorage({
     authToken: token,
     authUser: user,
   });
 
-  logger.info(`Logged in as ${user.name} (${user.role})`);
+  logger.info(`Logged in as ${user?.name || 'unknown'} (${user?.role || 'unknown'})`);
   return { token, user };
 }
 

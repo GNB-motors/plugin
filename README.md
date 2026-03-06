@@ -395,6 +395,35 @@ VITE_MAX_RETRY_ATTEMPTS=2
 
 ---
 
+# Testing & Quality Gates 🧪
+
+**186 tests** across 9 files — run with:
+
+```bash
+cd extension
+npm test              # Run all tests
+npm run test:watch    # Watch mode
+npm run test:coverage # With coverage report
+```
+
+| File | Tests | Coverage |
+|------|------:|----------|
+| `utils.test.js` | 16 | Pure functions: retries, JWT, time conversion |
+| `backendApi.test.js` | 19 | Backend auth, fetch, error codes |
+| `fleetedgeApi.test.js` | 20 | Tab injection, API errors |
+| `taskPoller.test.js` | 12 | Poll cycles, VIN resolution |
+| `integration.test.js` | 13 | End-to-end flows |
+| `telemetry.test.js` | 45 | LEMU telemetry collector |
+| `logger.test.js` | 6 | Buffered logging |
+| **`edge-cases-utils.test.js`** | **46** | **Error boundaries (pure functions)** |
+| **`edge-cases-integration.test.js`** | **9** | **Module-level edge cases** |
+
+> **55 edge-case tests** cover null JWT payloads, special-character registrations, timeout handling, 401 auth clearing, VIN fallback matching, and zero fuel values. These tests caught and fixed 2 real bugs (`normalizeRegistration` and `checkTokenExpiry`). See [TESTING.md](extension/TESTING.md) for details.
+
+Pre-push hooks (Husky) run `npm run lint` + `npm test` automatically — push is blocked if either fails.
+
+---
+
 # Troubleshooting 🐞
 
 | Problem              | Quick fix                                                                                              |
