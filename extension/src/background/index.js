@@ -3,13 +3,25 @@ import { initTaskPoller, triggerPollNow, forceRefreshVinMap } from './taskPoller
 import { getStorage, setStorage, removeStorage, getMetrics, normalizeRegistration, istToUtc } from './utils.js';
 import { getLogs, clearLogs, createLogger } from './logger.js';
 import { fetchFuelConsumption } from './fleetedgeApi.js';
+import { login, logout, isAuthenticated } from './backendApi.js';
+import { startTelemetry, record, LAYERS, createLayerLogger, getEvents, clearEvents, getStats, getHealthSnapshot, getBreadcrumbs } from './telemetry.js';
 
 const logger = createLogger('ServiceWorker');
+const tlog = createLayerLogger(LAYERS.MESSAGE);
 
 initTokenCapture();
 initTaskPoller();
+startTelemetry();
 
 logger.info('FleetEdge Fuel Monitor initialized');
+
+// Auto-poll on startup if already authenticated
+isAuthenticated().then((authed) => {
+  if (authed) {
+    logger.info('Already authenticated — triggering initial poll');
+    triggerPollNow();
+  }
+}).catch(() => {});
 
 chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
   handleMessage(message).then(sendResponse).catch(err => {
@@ -19,49 +31,36 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
   return true;
 });
 
-async function relayToBackend(payload) {
-  const store = await getStorage(['backendUrl', 'systemToken']);
-
-  if (!store.backendUrl || !store.systemToken) {
-    logger.warn('Backend not configured — result stored locally only');
-    return { relayed: false, reason: 'no_backend' };
-  }
-
-  const url = `${store.backendUrl.replace(/\/+$/, '')}/fuel-data/ingest`;
-
-  try {
-    const res = await fetch(url, {
-      method: 'POST',
-      headers: {
-        'Authorization': `Bearer ${store.systemToken}`,
-        'Content-Type': 'application/json',
-      },
-      body: JSON.stringify(payload),
-    });
-
-    if (!res.ok) {
-      const text = await res.text().catch(() => '');
-      logger.error(`Backend relay failed: ${res.status}`, text.slice(0, 200));
-      return { relayed: false, reason: `http_${res.status}`, detail: text.slice(0, 200) };
-    }
-
-    const result = await res.json().catch(() => ({}));
-    logger.info(`Relayed to backend: ${url}`);
-    return { relayed: true, backendResponse: result };
-
-  } catch (err) {
-    logger.error('Backend relay network error', err.message);
-    return { relayed: false, reason: 'network_error', detail: err.message };
-  }
-}
-
 async function handleMessage(message) {
   switch (message.type) {
+
+    case 'LOGIN': {
+      const { emailOrMobile, password } = message;
+      if (!emailOrMobile || !password) throw new Error('Email/mobile and password are required');
+      const result = await login(emailOrMobile, password);
+      // Auto-trigger poll after successful login
+      triggerPollNow();
+      return { success: true, user: result.user };
+    }
+
+    case 'LOGOUT': {
+      await logout();
+      chrome.action.setBadgeText({ text: '' });
+      return { success: true };
+    }
+
+    case 'GET_AUTH_STATUS': {
+      const store = await getStorage(['authToken', 'authUser']);
+      return {
+        authenticated: !!store.authToken,
+        user: store.authUser || null,
+      };
+    }
 
     case 'GET_STATUS': {
       const store = await getStorage([
         'fleetToken', 'fleetId', 'tokenExp', 'tokenCapturedAt',
-        'systemToken', 'backendUrl', 'vinMap', 'vinMapUpdatedAt',
+        'authToken', 'authUser', 'backendUrl', 'vinMap', 'vinMapUpdatedAt',
       ]);
 
       const tokenState = store.fleetToken
@@ -75,7 +74,8 @@ async function handleMessage(message) {
         tokenValid: tokenState.valid,
         remainingSeconds: tokenState.remainingSeconds || 0,
         fleetId: store.fleetId || null,
-        hasSystemToken: !!store.systemToken,
+        authenticated: !!store.authToken,
+        user: store.authUser || null,
         backendUrl: store.backendUrl || null,
         vehicleCount: store.vinMap ? Object.keys(store.vinMap).length : 0,
         vinMapAge: store.vinMapUpdatedAt
@@ -83,13 +83,6 @@ async function handleMessage(message) {
           : null,
         metrics,
       };
-    }
-
-    case 'SET_SYSTEM_TOKEN': {
-      if (!message.token) throw new Error('Token is required');
-      await setStorage({ systemToken: message.token });
-      logger.info('System token updated');
-      return { success: true };
     }
 
     case 'SET_BACKEND_URL': {
@@ -126,9 +119,6 @@ async function handleMessage(message) {
     }
 
     case 'MANUAL_FETCH': {
-      // message: { identifier, fromDate, fromTime, toDate, toTime }
-      // identifier = registration number (e.g. "WB25R9640")
-      //            OR VIN/chassis (e.g. "MAT828113S2C05629")
       const { identifier, fromDate, fromTime, toDate, toTime } = message;
       if (!identifier || !fromDate || !fromTime || !toDate || !toTime) {
         throw new Error('identifier, fromDate, fromTime, toDate, toTime are all required');
@@ -140,7 +130,6 @@ async function handleMessage(message) {
       const store = await getStorage(['vinMap', 'fleetId']);
       if (!store.fleetId) throw new Error('Fleet ID not found — capture a token first');
 
-      // Auto-detect: 17-char alphanumeric = VIN/chassis, else treat as registration
       const isVin = /^[A-Z0-9]{14,20}$/i.test(identifier.trim());
       let vin;
       let registration = null;
@@ -151,6 +140,17 @@ async function handleMessage(message) {
       } else {
         registration = normalizeRegistration(identifier);
         vin = store.vinMap?.[registration];
+
+        // Last-4-digit fallback
+        if (!vin) {
+          const last4 = registration.slice(-4);
+          const fallbackKey = Object.keys(store.vinMap || {}).find((k) => k.endsWith(last4));
+          if (fallbackKey) {
+            vin = store.vinMap[fallbackKey];
+            logger.info(`Manual fetch fallback: last4=${last4} → ${fallbackKey} → ${vin}`);
+          }
+        }
+
         if (!vin) {
           throw new Error(
             `VIN not found for registration "${identifier}" — try Refresh Vehicles first, or enter the VIN/chassis directly`
@@ -189,14 +189,8 @@ async function handleMessage(message) {
 
       await setStorage({ manualQueryResult: payload });
 
-      const relay = await relayToBackend(payload);
-
-      logger.info(
-        `Manual fetch done: ${payload.resultCount} record(s)` +
-        (relay.relayed ? ' — relayed ✓' : ` — local only (${relay.reason})`)
-      );
-
-      return { success: true, vin, registration, resultCount: payload.resultCount, data, relay };
+      logger.info(`Manual fetch done: ${payload.resultCount} record(s)`);
+      return { success: true, vin, registration, resultCount: payload.resultCount, data };
     }
 
     case 'GET_MANUAL_RESULT': {
@@ -207,11 +201,44 @@ async function handleMessage(message) {
     case 'CLEAR_ALL': {
       await removeStorage([
         'fleetToken', 'fleetId', 'tokenExp', 'tokenCapturedAt',
-        'systemToken', 'backendUrl', 'vinMap', 'vinMapUpdatedAt',
+        'authToken', 'authUser', 'backendUrl', 'vinMap', 'vinMapUpdatedAt',
         'metrics', 'manualQueryResult',
       ]);
       chrome.action.setBadgeText({ text: '' });
       logger.info('All data cleared');
+      return { success: true };
+    }
+
+    // ─── LEMU Telemetry Messages ─────────────────────────────────────────
+    case 'GET_TELEMETRY': {
+      tlog.debug('Querying telemetry events');
+      const events = await getEvents(message.filters || {});
+      return { events };
+    }
+
+    case 'GET_TELEMETRY_STATS': {
+      const stats = await getStats();
+      return { stats };
+    }
+
+    case 'GET_HEALTH': {
+      const health = await getHealthSnapshot();
+      return { health };
+    }
+
+    case 'GET_BREADCRUMBS': {
+      return { breadcrumbs: getBreadcrumbs() };
+    }
+
+    case 'CLEAR_TELEMETRY': {
+      await clearEvents();
+      tlog.info('Telemetry cleared');
+      return { success: true };
+    }
+
+    case 'FLUSH_TELEMETRY': {
+      // Force flush events to storage and trigger backend ship
+      record(LAYERS.MESSAGE, 'INFO', 'Manual flush triggered');
       return { success: true };
     }
 

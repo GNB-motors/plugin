@@ -9,7 +9,6 @@ const IST_OFFSET_MS = 5.5 * 60 * 60 * 1000;
 const DEFAULT_METRICS = {
   totalProcessed: 0,
   totalFailed: 0,
-  totalSkipped: 0,
   lastPollAt: null,
   lastErrorAt: null,
   lastError: null,

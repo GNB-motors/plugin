@@ -1,11 +1,12 @@
 {
   "name": "fleetedge-fuel-monitor",
   "private": true,
-  "version": "1.0.0",
+  "version": "1.0.1",
   "type": "module",
   "scripts": {
     "dev": "vite",
     "build": "vite build",
+    "build:zip": "vite build && node scripts/upload-sourcemaps.cjs && node scripts/build-zip.cjs",
     "lint": "eslint .",
     "preview": "vite preview",
     "test": "vitest run",

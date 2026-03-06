@@ -10,26 +10,39 @@ A Chrome Extension (Manifest V3) that passively captures FleetEdge authenticatio
 
 ### High-Level Flow
 
+```mermaid
+sequenceDiagram
+    participant U as User
+    participant FE as FleetEdge Tab
+    participant EXT as Extension (SW)
+    participant BE as Backend Server
+
+    U->>FE: Logs into FleetEdge normally
+    FE-->>EXT: Token captured via webRequest
+    U->>EXT: Signs in to backend (popup)
+    EXT->>BE: POST /api/extension/auth/login
+    BE-->>EXT: JWT token + user info
+
+    loop Every 1 minute
+        EXT->>BE: GET /api/extension/tasks/pending
+        BE-->>EXT: Pending fuel comparison tasks
+        loop Each task
+            EXT->>FE: Inject fetch() via executeScript
+            FE-->>EXT: FleetEdge fuel data
+            EXT->>BE: POST /api/extension/tasks/:id/result
+        end
+    end
 ```
-┌──────────────────────────────────────────────────────────────────────────┐
-│                            USER'S BROWSER                                │
-│                                                                          │
-│  1. User logs into FleetEdge normally (tab stays open)                   │
-│  2. Extension intercepts the Bearer token from network requests          │
-│  3. Every 5 min, extension polls YOUR backend for pending tasks          │
-│  4. For each task:                                                       │
-│     - Extension injects fetch() INTO the FleetEdge tab via              │
-│       chrome.scripting.executeScript                                     │
-│     - Fetch calls FleetEdge APIs FROM the tab (Origin correct)           │
-│     - Results returned to extension service worker                       │
-│  5. Extension POSTs results back to YOUR backend                         │
-│                                                                          │
-│  ┌─────────────┐    Token    ┌──────────────────┐   Data   ┌──────────┐ │
-│  │  FleetEdge  │ ◄────────── │    Extension      │ ◄──────► │ Backend  │ │
-│  │  Website    │ (injection) │  (service worker) │ ────────►│  Server  │ │
-│  │  (tab)      │             │                  │ Results  └──────────┘ │
-│  └─────────────┘             └──────────────────┘                       │
-└──────────────────────────────────────────────────────────────────────────┘
+
+```mermaid
+graph LR
+    A[FleetEdge Tab] -->|Token capture| B[Extension Service Worker]
+    B -->|Poll tasks| C[Backend API]
+    C -->|Pending tasks| B
+    B -->|Inject fetch| A
+    A -->|Fuel data| B
+    B -->|Submit results| C
+    C -->|Flag discrepancies| D[Frontend Dashboard]
 ```
 
 **Key points:**
@@ -42,7 +55,7 @@ A Chrome Extension (Manifest V3) that passively captures FleetEdge authenticatio
 
 1. **Token Capture** — The extension listens to all requests going to `https://cvp.api.tatamotors/*` via Chrome's `webRequest` API. When it sees an `Authorization: Bearer <jwt>` header, it saves the token and decodes the `fleet_id` from the JWT payload. This happens passively whenever the user is browsing FleetEdge.
 
-2. **Task Polling** — A Chrome alarm fires every N minutes (default 5). The extension calls `GET /tasks/pending` on your backend to get a list of vehicles + time ranges that need fuel data.
+2. **Task Polling** — A Chrome alarm fires every 1 minute (configurable). The extension calls `GET /api/extension/tasks/pending` on the backend to get a list of vehicles + time ranges that need fuel data.
 
 3. **Tab Injection** — All FleetEdge API calls use `chrome.scripting.executeScript` to run inside the open FleetEdge browser tab. This bypasses Chrome's restriction on service-worker Origin headers.
 
@@ -93,11 +106,11 @@ Load into Chrome:
 
 ### First-Time Setup
 
-1. Click the extension icon → Settings (⚙️)
-2. Enter your **backend URL** and **backend auth token**
+1. Click the extension icon → **Sign In** with your backend credentials (email/mobile + password)
+2. Only OWNER, MANAGER, or SUPER_ADMIN roles can use the extension
 3. Open FleetEdge in a new tab and log in normally
-4. The extension captures the token automatically — you'll see a green badge
-5. Click **Refresh Vehicles** to load the VIN map
+4. The extension captures the token automatically — you'll see a green badge ✓
+5. The extension begins polling for tasks automatically after both logins are complete
 6. Click **Poll Tasks Now** to test
 
 ---

@@ -1,6 +1,6 @@
 import { getValidToken } from './tokenCapture.js';
 import { fetchVehicles, fetchFuelConsumption, ApiError } from './fleetedgeApi.js';
-import { fetchPendingTasks, submitTaskResult, reportTaskError, getSystemToken } from './backendApi.js';
+import { fetchPendingTasks, submitTaskResult, reportTaskError, isAuthenticated } from './backendApi.js';
 import { buildUtcWindow, istToUtc, sleep, getStorage, setStorage, normalizeRegistration, updateMetrics, getMetrics } from './utils.js';
 import { config } from './config.js';
 import { createLogger } from './logger.js';
@@ -10,6 +10,16 @@ const logger = createLogger('TaskPoller');
 const VIN_CACHE_TTL_MS = config.VIN_CACHE_TTL_HOURS * 60 * 60 * 1000;
 
 let isProcessing = false;
+
+/** Pre-build a suffix→key Map for O(1) last-4-digit VIN fallback lookups. */
+function buildLast4Index(vinMap) {
+  const index = new Map();
+  for (const key of Object.keys(vinMap)) {
+    const suffix = key.slice(-4);
+    if (!index.has(suffix)) index.set(suffix, key);
+  }
+  return index;
+}
 
 export function initTaskPoller() {
   chrome.alarms.create('pollTasks', {
@@ -38,9 +48,10 @@ async function runPollCycle() {
   let failed = 0;
 
   try {
-    const systemToken = await getSystemToken();
-    if (!systemToken) {
-      logger.warn('No system token, skipping');
+    // Check backend auth
+    const authed = await isAuthenticated();
+    if (!authed) {
+      logger.warn('Not authenticated to backend, skipping');
       return;
     }
 
@@ -54,7 +65,7 @@ async function runPollCycle() {
 
     let tasks;
     try {
-      tasks = await fetchPendingTasks(systemToken);
+      tasks = await fetchPendingTasks();
     } catch (err) {
       logger.error('Failed to fetch tasks:', err.message);
       await updateMetrics({ lastPollAt: Date.now(), lastError: err.message, lastErrorAt: Date.now() });
@@ -71,6 +82,7 @@ async function runPollCycle() {
     updateBadgeCount(tasks.length);
 
     const vinMap = await getOrRefreshVinMap(token, fleetId);
+    const last4Index = buildLast4Index(vinMap);
 
     for (let i = 0; i < tasks.length; i++) {
       const task = tasks[i];
@@ -83,7 +95,7 @@ async function runPollCycle() {
       }
 
       try {
-        await processTask(task, recheck.token, fleetId, vinMap, systemToken);
+        await processTask(task, recheck.token, fleetId, vinMap, last4Index);
         processed++;
       } catch (err) {
         failed++;
@@ -94,7 +106,7 @@ async function runPollCycle() {
           break;
         }
 
-        await reportTaskError(systemToken, task.id, err.message);
+        await reportTaskError(task.id, err.message);
       }
 
       if (i < tasks.length - 1) {
@@ -160,14 +172,24 @@ function validateTask(task) {
   return null;
 }
 
-async function processTask(task, token, fleetId, vinMap, systemToken) {
+async function processTask(task, token, fleetId, vinMap, last4Index) {
   const validationError = validateTask(task);
   if (validationError) {
     throw new Error(`Task ${task.id}: ${validationError}`);
   }
 
   const normalizedReg = normalizeRegistration(task.vehicle_number);
-  const vin = vinMap[normalizedReg];
+  let vin = vinMap[normalizedReg];
+
+  // Last-4-digit fallback: match against last 4 chars of registration
+  if (!vin) {
+    const last4 = normalizedReg.slice(-4);
+    const fallbackKey = last4Index.get(last4);
+    if (fallbackKey) {
+      vin = vinMap[fallbackKey];
+      logger.info(`VIN fallback match: last4=${last4} → ${fallbackKey} → ${vin}`);
+    }
+  }
 
   if (!vin) {
     throw new Error(`VIN not found for registration: ${task.vehicle_number}`);
@@ -179,8 +201,11 @@ async function processTask(task, token, fleetId, vinMap, systemToken) {
   const response = await fetchFuelConsumption(token, fleetId, [vin], from, to);
   const results = response.results || [];
 
-  logger.info(`Task ${task.id}: ${results.length} result(s), submitting`);
-  await submitTaskResult(systemToken, task.id, results);
+  // Sum up total fuel consumed from FleetEdge results
+  const totalFuelConsumed = results.reduce((sum, r) => sum + (r.fuel_used || 0), 0);
+
+  logger.info(`Task ${task.id}: ${results.length} result(s), total fuel: ${totalFuelConsumed.toFixed(2)}L, submitting`);
+  await submitTaskResult(task.id, { totalFuelConsumed, rawResponse: response });
 }
 
 async function getOrRefreshVinMap(token, fleetId) {

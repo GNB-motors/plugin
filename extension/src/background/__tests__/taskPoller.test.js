@@ -53,7 +53,7 @@ vi.mock('../tokenCapture.js', () => ({
 }));
 
 vi.mock('../backendApi.js', () => ({
-  getSystemToken: vi.fn(() => Promise.resolve('sys-token')),
+  isAuthenticated: vi.fn(() => Promise.resolve(true)),
   fetchPendingTasks: vi.fn(() => Promise.resolve(mockTasks)),
   submitTaskResult: vi.fn(() => Promise.resolve({})),
   reportTaskError: vi.fn(() => Promise.resolve()),
@@ -68,7 +68,7 @@ vi.mock('../fleetedgeApi.js', () => ({
 }));
 
 const { initTaskPoller, triggerPollNow } = await import('../taskPoller.js');
-import { fetchPendingTasks, submitTaskResult, reportTaskError } from '../backendApi.js';
+import { fetchPendingTasks, submitTaskResult, reportTaskError, isAuthenticated } from '../backendApi.js';
 import { getValidToken } from '../tokenCapture.js';
 import { fetchFuelConsumption } from '../fleetedgeApi.js';
 
@@ -79,6 +79,7 @@ beforeEach(() => {
   Object.assign(mockTokenState, { valid: true, token: 'fleet-tok', fleetId: 'fleet-1', remainingSeconds: 3600 });
   // Reset mock resolved values
   vi.mocked(getValidToken).mockResolvedValue({ ...mockTokenState });
+  vi.mocked(isAuthenticated).mockResolvedValue(true);
   vi.mocked(fetchPendingTasks).mockResolvedValue([]);
   vi.mocked(submitTaskResult).mockResolvedValue({});
   vi.mocked(reportTaskError).mockResolvedValue();
@@ -103,9 +104,8 @@ describe('triggerPollNow', () => {
     expect(fetchPendingTasks).not.toHaveBeenCalled();
   });
 
-  it('returns early without calling fetchPendingTasks when there is no system token', async () => {
-    const { getSystemToken } = await import('../backendApi.js');
-    vi.mocked(getSystemToken).mockResolvedValueOnce(null);
+  it('returns early without calling fetchPendingTasks when not authenticated to backend', async () => {
+    vi.mocked(isAuthenticated).mockResolvedValueOnce(false);
     await triggerPollNow();
     expect(fetchPendingTasks).not.toHaveBeenCalled();
   });
@@ -125,7 +125,6 @@ describe('triggerPollNow', () => {
     await triggerPollNow();
 
     expect(reportTaskError).toHaveBeenCalledWith(
-      expect.any(String),
       'task-1',
       expect.stringContaining('VIN not found')
     );
@@ -154,9 +153,8 @@ describe('triggerPollNow', () => {
     const diffMs = new Date(toUtc).getTime() - new Date(fromUtc).getTime();
     expect(diffMs).toBe(60 * 60 * 1000); // 60 minutes
     expect(submitTaskResult).toHaveBeenCalledWith(
-      expect.any(String),
       'task-legacy',
-      expect.arrayContaining([expect.objectContaining({ vin: 'MAT828113S2C05629' })])
+      expect.objectContaining({ totalFuelConsumed: 88.5 })
     );
   });
 
@@ -192,9 +190,8 @@ describe('triggerPollNow', () => {
     expect(toUtc).toBe('2026-02-18T09:20:00.000');
 
     expect(submitTaskResult).toHaveBeenCalledWith(
-      expect.any(String),
       'task-range',
-      expect.arrayContaining([expect.objectContaining({ fuel_used: 95.3 })])
+      expect.objectContaining({ totalFuelConsumed: 95.3 })
     );
   });
 
@@ -239,7 +236,6 @@ describe('triggerPollNow', () => {
     await triggerPollNow();
 
     expect(reportTaskError).toHaveBeenCalledWith(
-      expect.any(String),
       'task-bad',
       expect.stringContaining('missing time fields')
     );

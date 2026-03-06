@@ -1,6 +1,8 @@
 import { decodeJwtPayload, redactToken, setStorage, getStorage } from './utils.js';
 import { config } from './config.js';
 import { createLogger } from './logger.js';
+import { triggerPollNow } from './taskPoller.js';
+import { isAuthenticated } from './backendApi.js';
 
 const logger = createLogger('TokenCapture');
 
@@ -47,6 +49,14 @@ function handleRequest(details) {
     chrome.action.setBadgeBackgroundColor({ color: '#22c55e' });
 
     logger.info(`Token captured, fleet: ${fleetId}, token: ${redactToken(token)}`);
+
+    // Auto-trigger a poll cycle when a new FleetEdge token is captured
+    isAuthenticated().then((authed) => {
+      if (authed) {
+        logger.info('Backend authenticated — auto-triggering poll after token capture');
+        triggerPollNow();
+      }
+    }).catch(() => {});
   } catch (err) {
     logger.error('Failed to decode JWT:', err.message);
   }

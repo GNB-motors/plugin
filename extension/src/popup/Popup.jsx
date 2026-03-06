@@ -12,6 +12,109 @@ function formatRelativeTime(isoOrMs) {
   return `${Math.floor(diff / 3600)}h ago`;
 }
 
+// ─── Login Screen ────────────────────────────────────────────────────────────
+function LoginView({ onLogin, backendUrl, onSetBackendUrl }) {
+  const [emailOrMobile, setEmailOrMobile] = useState('');
+  const [password, setPassword] = useState('');
+  const [urlInput, setUrlInput] = useState(backendUrl || '');
+  const [showUrl, setShowUrl] = useState(false);
+  const [loading, setLoading] = useState(false);
+  const [error, setError] = useState('');
+
+  const handleSubmit = useCallback(async (e) => {
+    e.preventDefault();
+    if (!emailOrMobile.trim() || !password.trim()) return;
+    setLoading(true);
+    setError('');
+    try {
+      const res = await chrome.runtime.sendMessage({
+        type: 'LOGIN',
+        emailOrMobile: emailOrMobile.trim(),
+        password: password.trim(),
+      });
+      if (res.error) throw new Error(res.error);
+      onLogin(res.user);
+    } catch (err) {
+      setError(err.message);
+    } finally {
+      setLoading(false);
+    }
+  }, [emailOrMobile, password, onLogin]);
+
+  const handleSaveUrl = useCallback(async () => {
+    if (!urlInput.trim()) return;
+    try {
+      await chrome.runtime.sendMessage({ type: 'SET_BACKEND_URL', url: urlInput.trim() });
+      onSetBackendUrl(urlInput.trim());
+    } catch (err) {
+      setError(err.message);
+    }
+  }, [urlInput, onSetBackendUrl]);
+
+  return (
+    <div className="popup login-view">
+      <div className="login-header">
+        <h1>FleetEdge Monitor</h1>
+        <p className="login-subtitle">Sign in to connect</p>
+      </div>
+
+      <form className="login-form" onSubmit={handleSubmit}>
+        <div className="input-group">
+          <label>Email or Mobile</label>
+          <input
+            type="text"
+            value={emailOrMobile}
+            onChange={(e) => setEmailOrMobile(e.target.value)}
+            placeholder="Enter email or mobile number"
+            autoFocus
+          />
+        </div>
+
+        <div className="input-group">
+          <label>Password</label>
+          <input
+            type="password"
+            value={password}
+            onChange={(e) => setPassword(e.target.value)}
+            placeholder="Enter password"
+            onKeyDown={(e) => e.key === 'Enter' && handleSubmit(e)}
+          />
+        </div>
+
+        {error && <p className="login-error">{error}</p>}
+
+        <button
+          type="submit"
+          className="btn-login"
+          disabled={loading || !emailOrMobile.trim() || !password.trim()}
+        >
+          {loading ? 'Signing in...' : 'Sign In'}
+        </button>
+      </form>
+
+      <div className="url-toggle">
+        <button onClick={() => setShowUrl((s) => !s)} className="btn-link">
+          {showUrl ? 'Hide' : 'Configure'} Backend URL
+        </button>
+      </div>
+
+      {showUrl && (
+        <div className="url-config">
+          <div className="input-row">
+            <input
+              type="text"
+              placeholder="https://api.example.com"
+              value={urlInput}
+              onChange={(e) => setUrlInput(e.target.value)}
+            />
+            <button onClick={handleSaveUrl}>Save</button>
+          </div>
+        </div>
+      )}
+    </div>
+  );
+}
+
 // ─── Manual Query view ───────────────────────────────────────────────────────
 function ManualQueryView({ onBack }) {
   const [identifier, setIdentifier] = useState('');
@@ -24,7 +127,6 @@ function ManualQueryView({ onBack }) {
   const [error, setError]           = useState('');
   const [copied, setCopied]         = useState(false);
 
-  // Load any previously saved result on mount
   useEffect(() => {
     chrome.runtime.sendMessage({ type: 'GET_MANUAL_RESULT' })
       .then(res => { if (res.result) setResult(res.result); })
@@ -105,7 +207,7 @@ function ManualQueryView({ onBack }) {
           onClick={handleFetch}
           disabled={fetching || !identifier.trim()}
         >
-          {fetching ? 'Fetching…' : '&#9654; Fetch Fuel Data'}
+          {fetching ? 'Fetching...' : '\u25B6 Fetch Fuel Data'}
         </button>
       </div>
 
@@ -126,13 +228,6 @@ function ManualQueryView({ onBack }) {
             {result.toIst || `${toDate} ${toTime}`} (IST)
           </p>
           <p className="result-meta saved-note">&#10003; Saved to extension storage</p>
-          {result.relay && (
-            <p className={`relay-badge ${result.relay.relayed ? 'relayed' : 'local'}`}>
-              {result.relay.relayed
-                ? '&#8593; Relayed to backend ✓'
-                : `💾 Local only (${result.relay.reason || 'no_backend'})`}
-            </p>
-          )}
 
           {records.length > 0 && (
             <div className="result-table-wrap">
@@ -148,10 +243,10 @@ function ManualQueryView({ onBack }) {
                 <tbody>
                   {records.map((r, i) => (
                     <tr key={i}>
-                      <td title={r.vin}>{(r.vin || '—').slice(-8)}</td>
-                      <td>{r.fuel_used != null ? r.fuel_used.toFixed(1) : '—'}</td>
-                      <td>{r.distance  != null ? r.distance.toFixed(1)  : '—'}</td>
-                      <td>{r.avg_speed != null ? r.avg_speed.toFixed(1) : '—'}</td>
+                      <td title={r.vin}>{(r.vin || '\u2014').slice(-8)}</td>
+                      <td>{r.fuel_used != null ? r.fuel_used.toFixed(1) : '\u2014'}</td>
+                      <td>{r.distance  != null ? r.distance.toFixed(1)  : '\u2014'}</td>
+                      <td>{r.avg_speed != null ? r.avg_speed.toFixed(1) : '\u2014'}</td>
                     </tr>
                   ))}
                 </tbody>
@@ -160,7 +255,7 @@ function ManualQueryView({ onBack }) {
           )}
 
           <button className="btn-secondary copy-btn" onClick={handleCopy}>
-            {copied ? '&#10003; Copied!' : '&#128203; Copy raw JSON'}
+            {copied ? '\u2713 Copied!' : '\uD83D\uDCCB Copy raw JSON'}
           </button>
         </div>
       )}
@@ -168,14 +263,14 @@ function ManualQueryView({ onBack }) {
   );
 }
 
+// ─── Main Popup ──────────────────────────────────────────────────────────────
 function Popup() {
   const [status, setStatus] = useState(null);
-  const [systemToken, setSystemToken] = useState('');
   const [backendUrl, setBackendUrl] = useState('');
+  const [showLogs, setShowLogs] = useState(false);
+  const [showQuery, setShowQuery] = useState(false);
   const [showSettings, setShowSettings] = useState(false);
   const [logs, setLogs] = useState([]);
-  const [showLogs, setShowLogs] = useState(false);
-  const [showQuery, setShowQuery]   = useState(false);
   const [loading, setLoading] = useState(true);
   const [actionMsg, setActionMsg] = useState('');
   const msgTimer = useRef(null);
@@ -199,40 +294,26 @@ function Popup() {
     }
   }, []);
 
-  // Initial fetch + auto-refresh while popup is open
   useEffect(() => {
     refreshStatus();
     const id = setInterval(refreshStatus, AUTO_REFRESH_MS);
     return () => clearInterval(id);
   }, [refreshStatus]);
 
-  const handleSaveToken = useCallback(async () => {
-    if (!systemToken.trim()) return;
+  const handleLogout = useCallback(async () => {
     try {
-      await chrome.runtime.sendMessage({ type: 'SET_SYSTEM_TOKEN', token: systemToken.trim() });
-      flash('Backend token saved ✓');
-      setSystemToken('');
+      await chrome.runtime.sendMessage({ type: 'LOGOUT' });
+      flash('Logged out');
       refreshStatus();
     } catch (err) {
       flash(`Error: ${err.message}`);
     }
-  }, [systemToken, flash, refreshStatus]);
-
-  const handleSaveBackendUrl = useCallback(async () => {
-    if (!backendUrl.trim()) return;
-    try {
-      await chrome.runtime.sendMessage({ type: 'SET_BACKEND_URL', url: backendUrl.trim() });
-      flash('Backend URL saved ✓');
-      refreshStatus();
-    } catch (err) {
-      flash(`Error: ${err.message}`);
-    }
-  }, [backendUrl, flash, refreshStatus]);
+  }, [flash, refreshStatus]);
 
   const handleTriggerPoll = useCallback(async () => {
     try {
       await chrome.runtime.sendMessage({ type: 'TRIGGER_POLL' });
-      flash('Poll triggered — check logs');
+      flash('Poll triggered \u2014 check logs');
     } catch (err) {
       flash(`Error: ${err.message}`);
     }
@@ -242,7 +323,7 @@ function Popup() {
     flash('Refreshing vehicles...');
     try {
       const res = await chrome.runtime.sendMessage({ type: 'REFRESH_VEHICLES' });
-      flash(res.success ? `Loaded ${res.count} vehicles ✓` : (res.error || 'No valid token'));
+      flash(res.success ? `Loaded ${res.count} vehicles \u2713` : (res.error || 'No valid token'));
       refreshStatus();
     } catch (err) {
       flash(`Error: ${err.message}`);
@@ -273,10 +354,32 @@ function Popup() {
     refreshStatus();
   }, [flash, refreshStatus]);
 
+  const handleSaveUrl = useCallback(async () => {
+    if (!backendUrl.trim()) return;
+    try {
+      await chrome.runtime.sendMessage({ type: 'SET_BACKEND_URL', url: backendUrl.trim() });
+      flash('Backend URL saved \u2713');
+      refreshStatus();
+    } catch (err) {
+      flash(`Error: ${err.message}`);
+    }
+  }, [backendUrl, flash, refreshStatus]);
+
   /* ---------- Render ---------- */
 
   if (loading && !status) {
     return <div className="popup"><p className="loading">Loading...</p></div>;
+  }
+
+  // Show login screen if not authenticated
+  if (!status?.authenticated) {
+    return (
+      <LoginView
+        backendUrl={backendUrl}
+        onLogin={() => refreshStatus()}
+        onSetBackendUrl={(url) => { setBackendUrl(url); flash('Backend URL saved \u2713'); }}
+      />
+    );
   }
 
   if (showQuery) {
@@ -315,13 +418,25 @@ function Popup() {
   }
 
   const m = status?.metrics;
+  const user = status?.user;
 
   return (
     <div className="popup">
       <div className="header">
         <h1>FleetEdge Monitor</h1>
-        <button onClick={() => setShowSettings(s => !s)} className="btn-settings">
-          &#9881;
+        <div className="header-actions">
+          <button onClick={() => setShowSettings(s => !s)} className="btn-settings" title="Settings">
+            &#9881;
+          </button>
+        </div>
+      </div>
+
+      {/* User info bar */}
+      <div className="user-bar">
+        <span className="user-name">{user?.name || 'User'}</span>
+        <span className="user-role">{user?.role || ''}</span>
+        <button onClick={handleLogout} className="btn-logout" title="Sign out">
+          Sign Out
         </button>
       </div>
 
@@ -330,9 +445,9 @@ function Popup() {
         {status?.hasFleetToken ? (
           <div className={`status-badge ${status.tokenValid ? 'valid' : 'expired'}`}>
             {status.tokenValid ? (
-              <>&#10003; Active &mdash; {Math.floor(status.remainingSeconds / 60)}m remaining</>
+              <>\u2713 Active &mdash; {Math.floor(status.remainingSeconds / 60)}m remaining</>
             ) : (
-              <>&#10007; Expired &mdash; please log into FleetEdge</>
+              <>\u2717 Expired &mdash; please log into FleetEdge</>
             )}
           </div>
         ) : (
@@ -342,18 +457,6 @@ function Popup() {
         )}
         {status?.fleetId && (
           <p className="detail">Fleet: {status.fleetId}</p>
-        )}
-      </section>
-
-      <section className="status-section">
-        <h2>Backend Connection</h2>
-        {status?.hasSystemToken ? (
-          <div className="status-badge valid">&#10003; Token Configured</div>
-        ) : (
-          <div className="status-badge inactive">&#10007; Not Configured</div>
-        )}
-        {status?.backendUrl && (
-          <p className="detail">{status.backendUrl}</p>
         )}
       </section>
 
@@ -392,31 +495,16 @@ function Popup() {
       {showSettings && (
         <section className="settings-section">
           <h2>Settings</h2>
-          
           <div className="input-group">
             <label>Backend URL</label>
             <div className="input-row">
               <input
                 type="text"
-                placeholder="https://api.example.com/api"
+                placeholder="https://api.example.com"
                 value={backendUrl}
                 onChange={(e) => setBackendUrl(e.target.value)}
               />
-              <button onClick={handleSaveBackendUrl}>Save</button>
-            </div>
-          </div>
-
-          <div className="input-group">
-            <label>Backend Token</label>
-            <div className="input-row">
-              <input
-                type="password"
-                placeholder="Enter your backend auth token"
-                value={systemToken}
-                onChange={(e) => setSystemToken(e.target.value)}
-                onKeyDown={(e) => e.key === 'Enter' && handleSaveToken()}
-              />
-              <button onClick={handleSaveToken}>Save</button>
+              <button onClick={handleSaveUrl}>Save</button>
             </div>
           </div>
         </section>
@@ -425,26 +513,26 @@ function Popup() {
       <section className="actions">
         <button 
           onClick={handleTriggerPoll} 
-          disabled={!status?.tokenValid || !status?.hasSystemToken}
+          disabled={!status?.tokenValid}
           className="btn-primary"
         >
-          &#9654; Poll Tasks Now
+          \u25B6 Poll Tasks Now
         </button>
         <button 
           onClick={handleRefreshVehicles} 
           disabled={!status?.tokenValid}
           className="btn-secondary"
         >
-          &#8635; Refresh Vehicles
+          \u21BB Refresh Vehicles
         </button>
         <button onClick={() => setShowQuery(true)} className="btn-secondary">
-          &#128269; Manual Query
+          \uD83D\uDD0D Manual Query
         </button>
         <button onClick={handleViewLogs} className="btn-secondary">
-          &#128203; View Logs
+          \uD83D\uDCCB View Logs
         </button>
         <button onClick={handleClearAll} className="btn-danger">
-          &#10007; Clear All Data
+          \u2717 Clear All Data
         </button>
       </section>
 
