@@ -117,6 +117,13 @@ async function backendFetch(path, options = {}) {
 
 // ─── Task APIs ───────────────────────────────────────────────────────────────
 
+/**
+ * Fetch all pending fuel comparison tasks from the backend.
+ * Called every 5 seconds while extension is active.
+ * @async
+ * @returns {Promise<Array<Object>>} Array of pending tasks with { id, vehicleId, vehicleNumber, ... }
+ * @throws {Error} If not authenticated or backend unreachable
+ */
 export async function fetchPendingTasks() {
   logger.info('Fetching pending tasks');
 
@@ -132,6 +139,16 @@ export async function fetchPendingTasks() {
   }
 }
 
+/**
+ * Submit fuel consumption result to backend for a completed task.
+ * @async
+ * @param {string} taskId - Task ID from backend
+ * @param {Object} results - FleetEdge sensor results
+ * @param {number} results.totalFuelConsumed - Consumption value from sensor (l/100km)
+ * @param {Object} results.rawResponse - Full sensor response for audit trail
+ * @returns {Promise<Object>} Backend response with { consumption: { isFlagged, ... } }
+ * @throws {Error} If submission fails after retries
+ */
 export async function submitTaskResult(taskId, results) {
   logger.info(`Submitting result for task ${taskId}`);
 
@@ -152,6 +169,15 @@ export async function submitTaskResult(taskId, results) {
   }
 }
 
+/**
+ * Report a task failure to the backend for retry queueing.
+ * Failures are batched and debounced via errorReporter.js.
+ * @async
+ * @param {string} taskId - Task ID from backend
+ * @param {string} errorMessage - Human-readable error description
+ * @returns {Promise<void>} Fire-and-forget (errors swallowed to prevent cascading failures)
+ * @description Non-critical — logged but doesn't throw if backend is unreachable
+ */
 export async function reportTaskError(taskId, errorMessage) {
   logger.warn(`Reporting error for task ${taskId}: ${errorMessage}`);
 

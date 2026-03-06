@@ -70,6 +70,17 @@ export function sleep(ms) {
   return new Promise(resolve => setTimeout(resolve, ms));
 }
 
+/**
+ * Retry an async operation with exponential backoff.
+ * Max 4 attempts with delays: 1s, 2s, 4s, 8s. Auth errors (401/403) fail immediately.
+ * @async
+ * @param {Function} fn - Async function to execute
+ * @param {string} [label='operation'] - Label for logging
+ * @returns {Promise<any>} Result from successful fn() call
+ * @throws {Error} If all retries exhausted or auth error encountered
+ * @example
+ * await withRetry(() => fetchPendingTasks(), 'fetch tasks')
+ */
 export async function withRetry(fn, label = 'operation') {
   const maxAttempts = config.MAX_RETRY_ATTEMPTS;
   let lastErr;
@@ -103,22 +114,41 @@ export function removeStorage(keys) {
   return chrome.storage.local.remove(keys);
 }
 
+/**
+ * Strip special characters from vehicle registration number and convert to uppercase.
+ * Matches backend normalization for consistent DB lookups.
+ * Example: 'DL1AC-1234*' → 'DL1AC1234'
+ * @param {string|null} reg - Vehicle registration number
+ * @returns {string} Normalized registration (uppercase alphanumeric only)
+ * @example
+ * normalizeRegistration('DL-01-AC-1234') // 'DL01AC1234'
+ * normalizeRegistration(null) // ''
+ */
 export function normalizeRegistration(reg) {
-  return (reg || '').replace(/[^a-zA-Z0-9]/g, '').toUpperCase();
+  if (!reg) return '';
+  return reg.replace(/[^a-zA-Z0-9]/g, '').toUpperCase();
 }
 
 /**
- * Pure function: checks whether a JWT payload's exp claim is valid.
- * @param {object} payload  Decoded JWT payload
- * @param {number} bufferSeconds  Treat as expired if expiry is within this many seconds
- * @returns {{ valid: boolean, remainingSeconds: number }}
+ * Check whether a JWT payload's exp claim is still valid.
+ * Accounts for clock skew via bufferSeconds (default 60s).
+ * @param {Object} payload - Decoded JWT payload from decodeJwtPayload()
+ * @param {number} [bufferSeconds=60] - Treat as expired if within N seconds of expiry
+ * @returns {Object} { valid: boolean, remainingSeconds: number }
+ * @example
+ * const { valid } = checkTokenExpiry(payload)
+ * if (!valid) { // refresh token }
  */
 export function checkTokenExpiry(payload, bufferSeconds = 60) {
   const exp = payload?.exp;
-  if (!exp || typeof exp !== 'number' || !Number.isFinite(exp)) return { valid: false, remainingSeconds: 0 };
+  if (!exp || typeof exp !== 'number' || !Number.isFinite(exp)) {
+    return { valid: false, remainingSeconds: 0 };
+  }
   const now = Math.floor(Date.now() / 1000);
   const remaining = exp - now;
-  if (remaining <= bufferSeconds) return { valid: false, remainingSeconds: Math.max(0, remaining) };
+  if (remaining <= bufferSeconds) {
+    return { valid: false, remainingSeconds: Math.max(0, remaining) };
+  }
   return { valid: true, remainingSeconds: remaining };
 }
 
