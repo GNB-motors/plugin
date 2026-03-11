@@ -1,29 +1,99 @@
-import { initTokenCapture, getValidToken } from './tokenCapture.js';
-import { initTaskPoller, triggerPollNow, forceRefreshVinMap } from './taskPoller.js';
-import { getStorage, setStorage, removeStorage, getMetrics, normalizeRegistration, istToUtc } from './utils.js';
+/**
+ * Service Worker — FleetEdge Fuel Monitor (CWS-Compliant Rewrite)
+ * ────────────────────────────────────────────────────────────────
+ * All FleetEdge API calls happen on the backend. This service worker:
+ *   - Handles extension auth (login/logout with backend)
+ *   - Manages FleetEdge token linking via content script → backend
+ *   - Polls backend for status updates
+ *   - Provides UI state to the popup
+ *
+ * Removed: tokenCapture (webRequest), fleetedgeApi (scripting.executeScript),
+ *          direct FleetEdge API calls, VIN map caching, Manual Query.
+ */
+
+import { connectFleetEdge, getFleetEdgeStatus, disconnectFleetEdge } from './fleetedgeLink.js';
+import { getStorage, setStorage, removeStorage, getMetrics } from './utils.js';
 import { getLogs, clearLogs, createLogger } from './logger.js';
-import { fetchFuelConsumption } from './fleetedgeApi.js';
-import { login, logout, isAuthenticated } from './backendApi.js';
+import { login, logout, isAuthenticated, backendFetch, fetchStatus } from './backendApi.js';
 import { startTelemetry, record, LAYERS, createLayerLogger, getEvents, clearEvents, getStats, getHealthSnapshot, getBreadcrumbs } from './telemetry.js';
+import { config } from './config.js';
 
 const logger = createLogger('ServiceWorker');
 const tlog = createLayerLogger(LAYERS.MESSAGE);
+const taskTel = createLayerLogger(LAYERS.TASK);
 
-initTokenCapture();
-initTaskPoller();
+// ─── Status Deduplication ────────────────────────────────────────────────────
+// Prevents 4 concurrent getFleetEdgeStatus() requests from alarm, startup,
+// message handler, and fire-and-forget post-login all hitting backend at once.
+const STATUS_CACHE_TTL_MS = 10_000; // 10s
+let _statusPromise = null;
+let _statusCacheTime = 0;
+
+/**
+ * Deduplicating wrapper around getFleetEdgeStatus().
+ * Returns a cached result if called within STATUS_CACHE_TTL_MS.
+ */
+async function getCachedFleetEdgeStatus() {
+  const now = Date.now();
+  if (_statusPromise && (now - _statusCacheTime) < STATUS_CACHE_TTL_MS) {
+    return _statusPromise;
+  }
+  _statusCacheTime = now;
+  _statusPromise = getFleetEdgeStatus().catch((err) => {
+    _statusPromise = null; // Clear on error so next call retries
+    throw err;
+  });
+  return _statusPromise;
+}
+
+/** Invalidate the status cache (after connect/disconnect/logout/clear). */
+function invalidateStatusCache() {
+  _statusPromise = null;
+  _statusCacheTime = 0;
+}
+
+// Initialize telemetry
 startTelemetry();
 
-logger.info('FleetEdge Fuel Monitor initialized');
+logger.info('FleetEdge Fuel Monitor initialized (CWS-compliant, backend-direct)');
 
-// Auto-poll on startup if already authenticated
-isAuthenticated().then((authed) => {
-  if (authed) {
-    logger.info('Already authenticated — triggering initial poll');
-    triggerPollNow();
+// ─── Status Polling ──────────────────────────────────────────────────────────
+// Instead of the extension processing tasks, we just poll backend for status.
+
+chrome.alarms.create('statusPoll', {
+  delayInMinutes: 1,
+  periodInMinutes: config.STATUS_POLL_INTERVAL_MINUTES,
+});
+
+chrome.alarms.onAlarm.addListener(async (alarm) => {
+  if (alarm.name === 'statusPoll') {
+    try {
+      const authed = await isAuthenticated();
+      if (authed) {
+        await getCachedFleetEdgeStatus();
+      }
+    } catch {
+      // Silently ignore — will retry next cycle
+    }
   }
-}).catch(() => {});
+});
+
+// Auto-check FleetEdge status on startup if authenticated
+isAuthenticated().then(async (authed) => {
+  if (authed) {
+    logger.info('Already authenticated — checking FleetEdge status');
+    try {
+      await getCachedFleetEdgeStatus();
+    } catch { /* startup check — non-critical, retried by alarm */ }
+  }
+}).catch(() => { /* guard against isAuthenticated rejection */ });
+
+// ─── Message Handler ─────────────────────────────────────────────────────────
 
 chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
+  // Ignore messages from content scripts that aren't meant for us
+  if (message.type === 'READ_FLEETEDGE_TOKEN') return false;
+
   handleMessage(message).then(sendResponse).catch(err => {
     logger.error('Message handler error', err.message);
     sendResponse({ error: err.message });
@@ -37,14 +107,17 @@ async function handleMessage(message) {
     case 'LOGIN': {
       const { emailOrMobile, password } = message;
       if (!emailOrMobile || !password) throw new Error('Email/mobile and password are required');
+      tlog.info('Login requested');
       const result = await login(emailOrMobile, password);
-      // Auto-trigger poll after successful login
-      triggerPollNow();
+      // Fire-and-forget status check (getCached handles errors internally)
+      getCachedFleetEdgeStatus().catch(() => {});
       return { success: true, user: result.user };
     }
 
     case 'LOGOUT': {
+      tlog.info('Logout requested');
       await logout();
+      invalidateStatusCache();
       chrome.action.setBadgeText({ text: '' });
       return { success: true };
     }
@@ -59,54 +132,94 @@ async function handleMessage(message) {
 
     case 'GET_STATUS': {
       const store = await getStorage([
-        'fleetToken', 'fleetId', 'tokenExp', 'tokenCapturedAt',
-        'authToken', 'authUser', 'backendUrl', 'vinMap', 'vinMapUpdatedAt',
+        'authToken', 'authUser', 'backendUrl',
+        'fleetEdgeStatus', 'fleetEdgeFleetId', 'fleetEdgeExp',
+        'fleetEdgeVehicleCount', 'fleetEdgeLinkedAt',
       ]);
 
-      const tokenState = store.fleetToken
-        ? await getValidToken()
-        : { valid: false };
+      const cachedFe = {
+        status: store.fleetEdgeStatus || 'unknown',
+        fleetId: store.fleetEdgeFleetId || null,
+        remainingSeconds: 0,
+      };
 
-      const metrics = await getMetrics();
+      // Parallel fetch: metrics + (backend status + FleetEdge status) if authenticated
+      const [metrics, backendStatus, feStatus] = await Promise.all([
+        getMetrics(),
+        store.authToken
+          ? fetchStatus().then(r => r.data).catch(() => null)
+          : Promise.resolve(null),
+        store.authToken
+          ? getCachedFleetEdgeStatus().catch(() => cachedFe)
+          : Promise.resolve(cachedFe),
+      ]);
 
       return {
-        hasFleetToken: !!store.fleetToken,
-        tokenValid: tokenState.valid,
-        remainingSeconds: tokenState.remainingSeconds || 0,
-        fleetId: store.fleetId || null,
         authenticated: !!store.authToken,
         user: store.authUser || null,
         backendUrl: store.backendUrl || null,
-        vehicleCount: store.vinMap ? Object.keys(store.vinMap).length : 0,
-        vinMapAge: store.vinMapUpdatedAt
-          ? Math.round((Date.now() - store.vinMapUpdatedAt) / 60000)
-          : null,
+        fleetEdge: {
+          status: feStatus.status,
+          fleetId: feStatus.fleetId || store.fleetEdgeFleetId || null,
+          remainingSeconds: feStatus.remainingSeconds || 0,
+          vehicleCount: feStatus.vehicleCount || store.fleetEdgeVehicleCount || 0,
+          linkedAt: store.fleetEdgeLinkedAt || null,
+        },
+        backendStatus,
         metrics,
       };
     }
 
     case 'SET_BACKEND_URL': {
       if (!message.url) throw new Error('URL is required');
+      // Validate URL format before storing
+      try { new URL(message.url); } catch { throw new Error('Invalid URL format'); }
       await setStorage({ backendUrl: message.url });
+      invalidateStatusCache();
       logger.info(`Backend URL updated: ${message.url}`);
       return { success: true };
     }
 
-    case 'TRIGGER_POLL': {
-      triggerPollNow();
-      return { success: true, message: 'Poll triggered' };
+    // ─── FleetEdge Connection ──────────────────────────────────────────
+
+    case 'CONNECT_FLEETEDGE': {
+      tlog.info('FleetEdge connect requested');
+      invalidateStatusCache();
+      const result = await connectFleetEdge();
+      return result;
     }
 
-    case 'REFRESH_VEHICLES': {
+    case 'DISCONNECT_FLEETEDGE': {
+      tlog.info('FleetEdge disconnect requested');
+      const result = await disconnectFleetEdge();
+      invalidateStatusCache();
+      return result;
+    }
+
+    case 'GET_FLEETEDGE_STATUS': {
+      const status = await getCachedFleetEdgeStatus();
+      return status;
+    }
+
+    // ─── Trigger backend processing (optional manual trigger) ──────────
+
+    case 'TRIGGER_PROCESS': {
+      taskTel.info('Manual process trigger requested');
       try {
-        const map = await forceRefreshVinMap();
-        if (!map) return { success: false, error: 'No valid FleetEdge token — log in to FleetEdge first' };
-        return { success: true, count: Object.keys(map).length };
+        const response = await backendFetch('/fleetedge/process-tasks', { method: 'POST' });
+        const data = await response.json();
+        taskTel.info('Process trigger completed', {
+          tasksProcessed: data.data?.tasksProcessed,
+          results: data.data?.results?.length,
+        });
+        return { success: true, result: data.data };
       } catch (err) {
-        logger.error('Vehicle refresh failed', err.message);
+        taskTel.error('Process trigger failed', { error: err.message });
         return { success: false, error: err.message };
       }
     }
+
+    // ─── Logs ──────────────────────────────────────────────────────────
 
     case 'GET_LOGS': {
       const logs = await getLogs(message.limit || 100);
@@ -118,91 +231,21 @@ async function handleMessage(message) {
       return { success: true };
     }
 
-    case 'MANUAL_FETCH': {
-      const { identifier, fromDate, fromTime, toDate, toTime } = message;
-      if (!identifier || !fromDate || !fromTime || !toDate || !toTime) {
-        throw new Error('identifier, fromDate, fromTime, toDate, toTime are all required');
-      }
-
-      const tokenState = await getValidToken(60);
-      if (!tokenState.valid) throw new Error('No valid FleetEdge token — please log into FleetEdge first');
-
-      const store = await getStorage(['vinMap', 'fleetId']);
-      if (!store.fleetId) throw new Error('Fleet ID not found — capture a token first');
-
-      const isVin = /^[A-Z0-9]{14,20}$/i.test(identifier.trim());
-      let vin;
-      let registration = null;
-
-      if (isVin) {
-        vin = identifier.trim().toUpperCase();
-        logger.info(`Manual fetch: using VIN directly: ${vin}`);
-      } else {
-        registration = normalizeRegistration(identifier);
-        vin = store.vinMap?.[registration];
-
-        // Last-4-digit fallback
-        if (!vin) {
-          const last4 = registration.slice(-4);
-          const fallbackKey = Object.keys(store.vinMap || {}).find((k) => k.endsWith(last4));
-          if (fallbackKey) {
-            vin = store.vinMap[fallbackKey];
-            logger.info(`Manual fetch fallback: last4=${last4} → ${fallbackKey} → ${vin}`);
-          }
-        }
-
-        if (!vin) {
-          throw new Error(
-            `VIN not found for registration "${identifier}" — try Refresh Vehicles first, or enter the VIN/chassis directly`
-          );
-        }
-        logger.info(`Manual fetch: ${registration} → VIN ${vin}`);
-      }
-
-      const fromUtc = istToUtc(fromDate, fromTime);
-      const toUtc   = istToUtc(toDate,   toTime);
-      logger.info(`Manual fetch window: ${fromUtc} → ${toUtc}`);
-
-      const data = await fetchFuelConsumption(
-        tokenState.token,
-        store.fleetId,
-        [vin],
-        fromUtc,
-        toUtc
-      );
-
-      const payload = {
-        source: 'manual_query',
-        vin,
-        registration,
-        identifier,
-        fleetId: store.fleetId,
-        fromIst: `${fromDate} ${fromTime}`,
-        toIst:   `${toDate} ${toTime}`,
-        fromUtc,
-        toUtc,
-        fetchedAt: new Date().toISOString(),
-        resultCount: (data.results || []).length,
-        results: data.results || [],
-        rawResponse: data,
-      };
-
-      await setStorage({ manualQueryResult: payload });
-
-      logger.info(`Manual fetch done: ${payload.resultCount} record(s)`);
-      return { success: true, vin, registration, resultCount: payload.resultCount, data };
-    }
-
-    case 'GET_MANUAL_RESULT': {
-      const store = await getStorage(['manualQueryResult']);
-      return { result: store.manualQueryResult || null };
-    }
+    // ─── Data Management ───────────────────────────────────────────────
 
     case 'CLEAR_ALL': {
+      // Disconnect FleetEdge on backend
+      try {
+        await disconnectFleetEdge();
+      } catch { /* best-effort disconnect — proceed with clearing data */ }
+
+      invalidateStatusCache();
+
       await removeStorage([
-        'fleetToken', 'fleetId', 'tokenExp', 'tokenCapturedAt',
-        'authToken', 'authUser', 'backendUrl', 'vinMap', 'vinMapUpdatedAt',
-        'metrics', 'manualQueryResult',
+        'authToken', 'authUser', 'backendUrl',
+        'fleetEdgeStatus', 'fleetEdgeFleetId', 'fleetEdgeExp',
+        'fleetEdgeLinkedAt', 'fleetEdgeVehicleCount',
+        'metrics',
       ]);
       chrome.action.setBadgeText({ text: '' });
       logger.info('All data cleared');
@@ -237,7 +280,6 @@ async function handleMessage(message) {
     }
 
     case 'FLUSH_TELEMETRY': {
-      // Force flush events to storage and trigger backend ship
       record(LAYERS.MESSAGE, 'INFO', 'Manual flush triggered');
       return { success: true };
     }

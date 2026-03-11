@@ -115,164 +115,16 @@ function LoginView({ onLogin, backendUrl, onSetBackendUrl }) {
   );
 }
 
-// ─── Manual Query view ───────────────────────────────────────────────────────
-function ManualQueryView({ onBack }) {
-  const [identifier, setIdentifier] = useState('');
-  const [fromDate, setFromDate]     = useState('');
-  const [fromTime, setFromTime]     = useState('');
-  const [toDate, setToDate]         = useState('');
-  const [toTime, setToTime]         = useState('');
-  const [fetching, setFetching]     = useState(false);
-  const [result, setResult]         = useState(null);
-  const [error, setError]           = useState('');
-  const [copied, setCopied]         = useState(false);
-
-  useEffect(() => {
-    chrome.runtime.sendMessage({ type: 'GET_MANUAL_RESULT' })
-      .then(res => { if (res.result) setResult(res.result); })
-      .catch(() => {});
-  }, []);
-
-  const handleFetch = useCallback(async () => {
-    if (!identifier.trim()) return;
-    setFetching(true);
-    setError('');
-    setResult(null);
-    try {
-      const res = await chrome.runtime.sendMessage({
-        type: 'MANUAL_FETCH',
-        identifier: identifier.trim(),
-        fromDate, fromTime,
-        toDate,   toTime,
-      });
-      if (res.error) throw new Error(res.error);
-      setResult({ ...res, fetchedAt: new Date().toISOString() });
-    } catch (err) {
-      setError(err.message);
-    } finally {
-      setFetching(false);
-    }
-  }, [identifier, fromDate, fromTime, toDate, toTime]);
-
-  const handleCopy = useCallback(() => {
-    if (!result?.data) return;
-    navigator.clipboard.writeText(JSON.stringify(result.data, null, 2))
-      .then(() => { setCopied(true); setTimeout(() => setCopied(false), 2000); });
-  }, [result]);
-
-  const records = result?.data?.results || [];
-
-  return (
-    <div className="popup query-view">
-      <div className="logs-header">
-        <h1>Manual Query</h1>
-        <button onClick={onBack} className="btn-back">&larr; Back</button>
-      </div>
-
-      <div className="query-form">
-        <div className="input-group">
-          <label>Registration or VIN / Chassis</label>
-          <input
-            type="text"
-            value={identifier}
-            onChange={e => setIdentifier(e.target.value)}
-            placeholder="e.g. WB25R9640 or MAT828113S2C05629"
-          />
-        </div>
-
-        <div className="query-row">
-          <div className="input-group half">
-            <label>From date (IST)</label>
-            <input type="date" value={fromDate} onChange={e => setFromDate(e.target.value)} />
-          </div>
-          <div className="input-group half">
-            <label>From time (IST)</label>
-            <input type="time" value={fromTime} onChange={e => setFromTime(e.target.value)} />
-          </div>
-        </div>
-
-        <div className="query-row">
-          <div className="input-group half">
-            <label>To date (IST)</label>
-            <input type="date" value={toDate} onChange={e => setToDate(e.target.value)} />
-          </div>
-          <div className="input-group half">
-            <label>To time (IST)</label>
-            <input type="time" value={toTime} onChange={e => setToTime(e.target.value)} />
-          </div>
-        </div>
-
-        <button
-          className="btn-primary query-btn"
-          onClick={handleFetch}
-          disabled={fetching || !identifier.trim()}
-        >
-          {fetching ? 'Fetching...' : '\u25B6 Fetch Fuel Data'}
-        </button>
-      </div>
-
-      {error && <p className="query-error">{error}</p>}
-
-      {result && !error && (
-        <div className="query-result">
-          <div className="result-header">
-            <span>
-              VIN: <strong>{result.vin}</strong>
-              {result.registration && <> &mdash; Reg: <strong>{result.registration}</strong></>}
-            </span>
-            <span className="result-count">{records.length} record{records.length !== 1 ? 's' : ''}</span>
-          </div>
-          <p className="result-meta">
-            {result.fromIst || `${fromDate} ${fromTime}`}
-            &nbsp;&rarr;&nbsp;
-            {result.toIst || `${toDate} ${toTime}`} (IST)
-          </p>
-          <p className="result-meta saved-note">&#10003; Saved to extension storage</p>
-
-          {records.length > 0 && (
-            <div className="result-table-wrap">
-              <table className="result-table">
-                <thead>
-                  <tr>
-                    <th>VIN</th>
-                    <th>Fuel (L)</th>
-                    <th>Dist (km)</th>
-                    <th>Avg spd</th>
-                  </tr>
-                </thead>
-                <tbody>
-                  {records.map((r, i) => (
-                    <tr key={i}>
-                      <td title={r.vin}>{(r.vin || '\u2014').slice(-8)}</td>
-                      <td>{r.fuel_used != null ? r.fuel_used.toFixed(1) : '\u2014'}</td>
-                      <td>{r.distance  != null ? r.distance.toFixed(1)  : '\u2014'}</td>
-                      <td>{r.avg_speed != null ? r.avg_speed.toFixed(1) : '\u2014'}</td>
-                    </tr>
-                  ))}
-                </tbody>
-              </table>
-            </div>
-          )}
-
-          <button className="btn-secondary copy-btn" onClick={handleCopy}>
-            {copied ? '\u2713 Copied!' : '\uD83D\uDCCB Copy raw JSON'}
-          </button>
-        </div>
-      )}
-    </div>
-  );
-}
-
 // ─── Main Popup ──────────────────────────────────────────────────────────────
 function Popup() {
   const [status, setStatus] = useState(null);
   const [backendUrl, setBackendUrl] = useState('');
   const [showLogs, setShowLogs] = useState(false);
-  const [showQuery, setShowQuery] = useState(false);
   const [showSettings, setShowSettings] = useState(false);
   const [logs, setLogs] = useState([]);
   const [loading, setLoading] = useState(true);
   const [actionMsg, setActionMsg] = useState('');
+  const [connecting, setConnecting] = useState(false);
   const msgTimer = useRef(null);
 
   const flash = useCallback((msg, duration = 3000) => {
@@ -310,20 +162,44 @@ function Popup() {
     }
   }, [flash, refreshStatus]);
 
-  const handleTriggerPoll = useCallback(async () => {
+  const handleConnectFleetEdge = useCallback(async () => {
+    setConnecting(true);
+    flash('Connecting to FleetEdge...');
     try {
-      await chrome.runtime.sendMessage({ type: 'TRIGGER_POLL' });
-      flash('Poll triggered \u2014 check logs');
+      const res = await chrome.runtime.sendMessage({ type: 'CONNECT_FLEETEDGE' });
+      if (res.success) {
+        flash(`FleetEdge connected \u2713 (${res.vehicleCount} vehicles)`);
+      } else {
+        flash(res.error || 'Connection failed');
+      }
+      refreshStatus();
+    } catch (err) {
+      flash(`Error: ${err.message}`);
+    } finally {
+      setConnecting(false);
+    }
+  }, [flash, refreshStatus]);
+
+  const handleDisconnectFleetEdge = useCallback(async () => {
+    try {
+      await chrome.runtime.sendMessage({ type: 'DISCONNECT_FLEETEDGE' });
+      flash('FleetEdge disconnected');
+      refreshStatus();
     } catch (err) {
       flash(`Error: ${err.message}`);
     }
-  }, [flash]);
+  }, [flash, refreshStatus]);
 
-  const handleRefreshVehicles = useCallback(async () => {
-    flash('Refreshing vehicles...');
+  const handleTriggerProcess = useCallback(async () => {
+    flash('Processing tasks...');
     try {
-      const res = await chrome.runtime.sendMessage({ type: 'REFRESH_VEHICLES' });
-      flash(res.success ? `Loaded ${res.count} vehicles \u2713` : (res.error || 'No valid token'));
+      const res = await chrome.runtime.sendMessage({ type: 'TRIGGER_PROCESS' });
+      if (res.success) {
+        const r = res.result;
+        flash(`Done: ${r.processed} processed, ${r.failed} failed`);
+      } else {
+        flash(res.error || 'Processing failed');
+      }
       refreshStatus();
     } catch (err) {
       flash(`Error: ${err.message}`);
@@ -348,7 +224,7 @@ function Popup() {
   }, [flash]);
 
   const handleClearAll = useCallback(async () => {
-    if (!confirm('Clear all stored data including tokens and cache?')) return;
+    if (!confirm('Clear all stored data and disconnect FleetEdge?')) return;
     await chrome.runtime.sendMessage({ type: 'CLEAR_ALL' });
     flash('All data cleared');
     refreshStatus();
@@ -382,10 +258,6 @@ function Popup() {
     );
   }
 
-  if (showQuery) {
-    return <ManualQueryView onBack={() => setShowQuery(false)} />;
-  }
-
   if (showLogs) {
     return (
       <div className="popup logs-view">
@@ -417,7 +289,8 @@ function Popup() {
     );
   }
 
-  const m = status?.metrics;
+  const fe = status?.fleetEdge;
+  const bs = status?.backendStatus;
   const user = status?.user;
 
   return (
@@ -440,55 +313,76 @@ function Popup() {
         </button>
       </div>
 
+      {/* FleetEdge Connection */}
       <section className="status-section">
-        <h2>FleetEdge Token</h2>
-        {status?.hasFleetToken ? (
-          <div className={`status-badge ${status.tokenValid ? 'valid' : 'expired'}`}>
-            {status.tokenValid ? (
-              <>\u2713 Active &mdash; {Math.floor(status.remainingSeconds / 60)}m remaining</>
-            ) : (
-              <>\u2717 Expired &mdash; please log into FleetEdge</>
-            )}
-          </div>
+        <h2>FleetEdge Connection</h2>
+        {fe?.status === 'linked' ? (
+          <>
+            <div className="status-badge valid">
+              &#10003; Connected &mdash; {Math.floor((fe.remainingSeconds || 0) / 60)}m remaining
+            </div>
+            {fe.fleetId && <p className="detail">Fleet: {fe.fleetId}</p>}
+            {fe.vehicleCount > 0 && <p className="detail">{fe.vehicleCount} vehicles</p>}
+            <button onClick={handleDisconnectFleetEdge} className="btn-danger btn-sm">
+              Disconnect
+            </button>
+          </>
+        ) : fe?.status === 'expired' ? (
+          <>
+            <div className="status-badge expired">
+              &#10007; Session expired &mdash; please re-connect
+            </div>
+            <p className="detail hint">
+              1. Open FleetEdge and log in<br/>
+              2. Click &quot;Connect FleetEdge&quot; below
+            </p>
+            <button
+              onClick={handleConnectFleetEdge}
+              disabled={connecting}
+              className="btn-primary"
+            >
+              {connecting ? 'Connecting...' : '\u{1F517} Re-connect FleetEdge'}
+            </button>
+          </>
         ) : (
-          <div className="status-badge inactive">
-            No token &mdash; open FleetEdge and log in
-          </div>
-        )}
-        {status?.fleetId && (
-          <p className="detail">Fleet: {status.fleetId}</p>
+          <>
+            <div className="status-badge inactive">
+              Not connected &mdash; link your FleetEdge session
+            </div>
+            <p className="detail hint">
+              1. Open <strong>fleetedge.home.tatamotors</strong> and log in<br/>
+              2. Click &quot;Connect FleetEdge&quot; below
+            </p>
+            <button
+              onClick={handleConnectFleetEdge}
+              disabled={connecting}
+              className="btn-primary"
+            >
+              {connecting ? 'Connecting...' : '\u{1F517} Connect FleetEdge'}
+            </button>
+          </>
         )}
       </section>
 
-      <section className="status-section">
-        <h2>Vehicle Cache</h2>
-        {status?.vehicleCount > 0 ? (
-          <p className="detail">
-            {status.vehicleCount} vehicles
-            {status.vinMapAge !== null && ` (${status.vinMapAge}m ago)`}
-          </p>
-        ) : (
-          <p className="detail muted">Not loaded yet</p>
-        )}
-      </section>
-
-      {m && (m.totalProcessed > 0 || m.totalFailed > 0) && (
-        <section className="status-section metrics-section">
-          <h2>Runtime Metrics</h2>
+      {/* Backend Task Status */}
+      {bs && (
+        <section className="status-section">
+          <h2>Task Status</h2>
           <div className="metrics-grid">
-            <span className="metric-label">Processed</span>
-            <span className="metric-value">{m.totalProcessed ?? 0}</span>
+            <span className="metric-label">Pending</span>
+            <span className="metric-value">{bs.pending ?? 0}</span>
+            <span className="metric-label">Completed</span>
+            <span className="metric-value">{bs.completed ?? 0}</span>
             <span className="metric-label">Failed</span>
-            <span className="metric-value error">{m.totalFailed ?? 0}</span>
-            <span className="metric-label">Last poll</span>
-            <span className="metric-value">{formatRelativeTime(m.lastPollAt)}</span>
-            {m.lastCycleDuration != null && (
-              <>
-                <span className="metric-label">Cycle time</span>
-                <span className="metric-value">{(m.lastCycleDuration / 1000).toFixed(1)}s</span>
-              </>
-            )}
+            <span className="metric-value error">{bs.failed ?? 0}</span>
+            <span className="metric-label">Flagged</span>
+            <span className="metric-value warning">{bs.flagged ?? 0}</span>
+            <span className="metric-label">Last sync</span>
+            <span className="metric-value">{formatRelativeTime(bs.lastSyncAt)}</span>
           </div>
+          {bs.isUpToDate && (
+            <p className="detail" style={{ color: '#22c55e', marginTop: '4px' }}>&#10003; All tasks processed</p>
+          )}
         </section>
       )}
 
@@ -511,28 +405,18 @@ function Popup() {
       )}
 
       <section className="actions">
-        <button 
-          onClick={handleTriggerPoll} 
-          disabled={!status?.tokenValid}
+        <button
+          onClick={handleTriggerProcess}
+          disabled={fe?.status !== 'linked'}
           className="btn-primary"
         >
-          \u25B6 Poll Tasks Now
-        </button>
-        <button 
-          onClick={handleRefreshVehicles} 
-          disabled={!status?.tokenValid}
-          className="btn-secondary"
-        >
-          \u21BB Refresh Vehicles
-        </button>
-        <button onClick={() => setShowQuery(true)} className="btn-secondary">
-          \uD83D\uDD0D Manual Query
+          &#9654; Process Tasks Now
         </button>
         <button onClick={handleViewLogs} className="btn-secondary">
-          \uD83D\uDCCB View Logs
+          &#128203; View Logs
         </button>
         <button onClick={handleClearAll} className="btn-danger">
-          \u2717 Clear All Data
+          &#10007; Clear All Data
         </button>
       </section>
 

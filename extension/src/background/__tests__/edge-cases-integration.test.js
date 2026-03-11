@@ -1,6 +1,6 @@
 ﻿/**
- * FleetEdge Plugin - Integration Edge Cases & Error Boundaries
- * Tests that need MOCKED module dependencies (backendApi, fleetedgeApi, taskPoller).
+ * Edge Cases & Error Boundaries (CWS-compliant version)
+ * Tests that need MOCKED module dependencies (backendApi, fleetedgeLink).
  *
  * IMPORTANT: Each describe block uses vi.doMock() (not hoisted) and
  * vi.resetModules() for proper test isolation.
@@ -8,7 +8,6 @@
  * DO NOT SKIP THESE TESTS.
  *     timedFetch timeout -> extension hangs forever waiting for backend.
  *     401 clear-auth path -> user stuck in infinite re-login loop.
- *     VIN last-4 fallback -> tasks fail for vehicles with non-standard registrations.
  */
 
 import { describe, it, expect, vi, beforeEach } from 'vitest';
@@ -59,7 +58,7 @@ describe('backendApi - edge cases', () => {
         }
       });
     }));
-    await expect(mod.fetchPendingTasks()).rejects.toThrow('timed out');
+    await expect(mod.backendFetch('/status')).rejects.toThrow('timed out');
   }, 20000);
 
   it('login throws when response.json() has no data.token', async () => {
@@ -77,7 +76,7 @@ describe('backendApi - edge cases', () => {
       status: 401,
       json: () => Promise.resolve({ message: 'Token expired' }),
     }));
-    await expect(mod.fetchPendingTasks()).rejects.toThrow();
+    await expect(mod.backendFetch('/status')).rejects.toThrow();
     expect(chrome.storage.local.remove).toHaveBeenCalledWith(['authToken', 'authUser']);
   });
 
@@ -90,67 +89,31 @@ describe('backendApi - edge cases', () => {
     const result = await mod.fetchVehiclesFromBackend();
     expect(result).toEqual([]);
   });
+
+  it('backendFetch includes Authorization header', async () => {
+    const mockFetch = vi.fn().mockResolvedValue({
+      ok: true,
+      status: 200,
+      json: () => Promise.resolve({ data: {} }),
+    });
+    const mod = await setupBackendApi(mockFetch);
+    await mod.backendFetch('/fleetedge/status');
+
+    const [, opts] = mockFetch.mock.calls[0];
+    expect(opts.headers.Authorization).toBe('Bearer jwt-123');
+  });
 });
 
-// SECTION 2: fleetedgeApi.js Edge Cases
-describe('fleetedgeApi - edge cases', () => {
+// SECTION 2: fleetedgeLink.js Edge Cases
+describe('fleetedgeLink - edge cases', () => {
   beforeEach(() => {
     vi.restoreAllMocks();
     vi.resetModules();
   });
 
-  async function setupFleetedgeApi(chromeOverrides = {}) {
-    vi.doMock('../logger.js', () => ({
-      createLogger: () => ({ info: vi.fn(), warn: vi.fn(), error: vi.fn(), debug: vi.fn() }),
-    }));
-    vi.doMock('../config.js', () => ({
-      config: { CVP_API_BASE: 'https://cvp.api.tatamotors' },
-    }));
-    vi.doMock('../utils.js', () => ({
-      withRetry: vi.fn((fn) => fn()),
-    }));
-    vi.stubGlobal('chrome', {
-      tabs: { query: vi.fn().mockResolvedValue([{ id: 42 }]) },
-      scripting: { executeScript: vi.fn().mockResolvedValue([{}]) },
-      storage: { local: { get: vi.fn(() => Promise.resolve({})), set: vi.fn() } },
-      ...chromeOverrides,
-    });
-    return import('../fleetedgeApi.js');
-  }
-
-  it('multiple FleetEdge tabs: uses first tab', async () => {
-    const mod = await setupFleetedgeApi({
-      tabs: { query: vi.fn().mockResolvedValue([{ id: 10 }, { id: 20 }, { id: 30 }]) },
-      scripting: {
-        executeScript: vi.fn().mockResolvedValue([{
-          result: { ok: true, status: 200, text: JSON.stringify({ result: [] }) },
-        }]),
-      },
-    });
-    await mod.fetchVehicles('token', 'fleet-1');
-    const scriptCalls = chrome.scripting.executeScript.mock.calls;
-    expect(scriptCalls[0][0].target.tabId).toBe(10);
-  });
-
-  it('executeScript returning null result throws ApiError', async () => {
-    const mod = await setupFleetedgeApi({
-      tabs: { query: vi.fn().mockResolvedValue([{ id: 42 }]) },
-      scripting: { executeScript: vi.fn().mockResolvedValue([{ result: null }]) },
-    });
-    await expect(mod.fetchVehicles('token', 'fleet-1')).rejects.toThrow('no result');
-  });
-});
-
-// SECTION 3: taskPoller.js Edge Cases
-describe('taskPoller - edge cases', () => {
-  beforeEach(() => {
-    vi.restoreAllMocks();
-    vi.resetModules();
-  });
-
-  async function setupTaskPoller(opts = {}) {
-    const { tasks = [], vinMap = {}, fuelResults = [] } = opts;
-    const STORE = { vinMap, vinMapUpdatedAt: Date.now() };
+  async function setupFleetedgeLink(opts = {}) {
+    const { tabsResult = [], sendMessageResult = null, backendFetchResult = null } = opts;
+    const STORE = {};
 
     vi.stubGlobal('chrome', {
       storage: {
@@ -166,92 +129,115 @@ describe('taskPoller - edge cases', () => {
           remove: vi.fn(() => Promise.resolve()),
         },
       },
-      alarms: { create: vi.fn(), onAlarm: { addListener: vi.fn() } },
+      tabs: {
+        query: vi.fn(() => Promise.resolve(tabsResult)),
+        sendMessage: vi.fn(() => Promise.resolve(sendMessageResult)),
+      },
       action: { setBadgeText: vi.fn(), setBadgeBackgroundColor: vi.fn() },
-      notifications: { create: vi.fn() },
     });
 
     vi.doMock('../logger.js', () => ({
       createLogger: () => ({ info: vi.fn(), warn: vi.fn(), error: vi.fn(), debug: vi.fn() }),
     }));
     vi.doMock('../config.js', () => ({
-      config: {
-        POLL_INTERVAL_MINUTES: 5, INTER_TASK_DELAY_MS: 0,
-        VIN_CACHE_TTL_HOURS: 24, MAX_RETRY_ATTEMPTS: 3,
-        SEARCH_WINDOW_MINUTES: 30, TOKEN_EXPIRY_BUFFER_SECONDS: 60,
-        BACKEND_BASE_URL: 'http://localhost:3000',
-        API_PREFIX: '/api/extension',
-        CVP_API_BASE: 'https://cvp.api.tatamotors',
-        FLEETEDGE_ORIGIN: 'https://fleetedge.home.tatamotors',
-      },
+      config: { BACKEND_BASE_URL: 'http://localhost:3000', API_PREFIX: '/api/extension' },
     }));
-    vi.doMock('../utils.js', async (importOriginal) => {
-      const actual = await importOriginal();
-      return { ...actual };
-    });
-    vi.doMock('../tokenCapture.js', () => ({
-      getValidToken: vi.fn(() => Promise.resolve({
-        valid: true, token: 'tok', fleetId: 'f1', remainingSeconds: 9999,
-      })),
-    }));
-
-    const mockSubmitTaskResult = vi.fn(() => Promise.resolve({}));
-    const mockReportTaskError = vi.fn(() => Promise.resolve());
-
     vi.doMock('../backendApi.js', () => ({
-      isAuthenticated: vi.fn(() => Promise.resolve(true)),
-      fetchPendingTasks: vi.fn(() => Promise.resolve(tasks)),
-      submitTaskResult: mockSubmitTaskResult,
-      reportTaskError: mockReportTaskError,
-    }));
-    vi.doMock('../fleetedgeApi.js', () => ({
-      fetchVehicles: vi.fn(() => Promise.resolve([])),
-      fetchFuelConsumption: vi.fn(() => Promise.resolve({ results: fuelResults })),
-      ApiError: class ApiError extends Error {
-        constructor(msg, status) { super(msg); this.name = 'ApiError'; this.status = status; }
-      },
+      backendFetch: vi.fn(() => {
+        if (backendFetchResult) {
+          return Promise.resolve({
+            json: () => Promise.resolve(backendFetchResult),
+          });
+        }
+        return Promise.resolve({
+          json: () => Promise.resolve({ data: { success: true, vehicleCount: 0 } }),
+        });
+      }),
     }));
 
-    const { triggerPollNow } = await import('../taskPoller.js');
-    return { triggerPollNow, submitTaskResult: mockSubmitTaskResult, reportTaskError: mockReportTaskError };
+    return import('../fleetedgeLink.js');
   }
 
-  it('VIN last-4 fallback matches when full registration does not', async () => {
-    const { triggerPollNow, submitTaskResult, reportTaskError } = await setupTaskPoller({
-      tasks: [{ id: 'task-fallback', vehicle_number: 'XX99Z9640', refuel_date: '2026-03-01', refuel_time: '12:00' }],
-      vinMap: { WB25R9640: 'VIN-MATCH-001' },
-      fuelResults: [{ fuel_used: 50 }],
-    });
-    await triggerPollNow();
-    expect(submitTaskResult).toHaveBeenCalledWith(
-      'task-fallback',
-      expect.objectContaining({ totalFuelConsumed: 50 })
-    );
-    expect(reportTaskError).not.toHaveBeenCalled();
+  it('connectFleetEdge returns error when no FleetEdge tab is open', async () => {
+    const mod = await setupFleetedgeLink({ tabsResult: [] });
+    const result = await mod.connectFleetEdge();
+    expect(result.success).toBe(false);
+    expect(result.error).toContain('No FleetEdge tab');
   });
 
-  it('task with missing vehicle_number reports validation error', async () => {
-    const { triggerPollNow, reportTaskError } = await setupTaskPoller({
-      tasks: [{ id: 'task-no-vehicle', refuel_date: '2026-03-01', refuel_time: '12:00' }],
-      vinMap: { A: 'B' },
+  it('connectFleetEdge returns error when content script cannot read token', async () => {
+    const mod = await setupFleetedgeLink({
+      tabsResult: [{ id: 42 }],
+      sendMessageResult: { success: false, error: 'No token found' },
     });
-    await triggerPollNow();
-    expect(reportTaskError).toHaveBeenCalledWith(
-      'task-no-vehicle',
-      expect.stringContaining('missing vehicle_number')
-    );
+    const result = await mod.connectFleetEdge();
+    expect(result.success).toBe(false);
+    expect(result.error).toContain('No token found');
   });
 
-  it('fuel consumption with zero fuel_used still submits', async () => {
-    const { triggerPollNow, submitTaskResult } = await setupTaskPoller({
-      tasks: [{ id: 'task-zero-fuel', vehicle_number: 'WB25R9640', refuel_date: '2026-03-01', refuel_time: '12:00' }],
-      vinMap: { WB25R9640: 'VIN1' },
-      fuelResults: [{ fuel_used: 0 }],
+  it('connectFleetEdge succeeds when content script returns valid token', async () => {
+    const mod = await setupFleetedgeLink({
+      tabsResult: [{ id: 42 }],
+      sendMessageResult: {
+        success: true,
+        token: 'eyJhbGciOiJSUzI1NiJ9.eyJmbGVldF9pZCI6IkYxMjMiLCJleHAiOjk5OTk5OTk5OTl9.sig',
+        fleetId: 'F123',
+        exp: 9999999999,
+        foundIn: 'localStorage:kc-access',
+      },
+      backendFetchResult: { data: { success: true, vehicleCount: 15, expiresAt: 9999999999 } },
     });
-    await triggerPollNow();
-    expect(submitTaskResult).toHaveBeenCalledWith(
-      'task-zero-fuel',
-      expect.objectContaining({ totalFuelConsumed: 0 })
-    );
+    const result = await mod.connectFleetEdge();
+    expect(result.success).toBe(true);
+    expect(result.vehicleCount).toBe(15);
+  });
+
+  it('connectFleetEdge handles sendMessage error gracefully', async () => {
+    vi.restoreAllMocks();
+    vi.resetModules();
+
+    const STORE = {};
+    vi.stubGlobal('chrome', {
+      storage: {
+        local: {
+          get: vi.fn((keys) => {
+            const result = {};
+            (Array.isArray(keys) ? keys : [keys]).forEach(k => {
+              if (k in STORE) result[k] = STORE[k];
+            });
+            return Promise.resolve(result);
+          }),
+          set: vi.fn((obj) => { Object.assign(STORE, obj); return Promise.resolve(); }),
+          remove: vi.fn(() => Promise.resolve()),
+        },
+      },
+      tabs: {
+        query: vi.fn(() => Promise.resolve([{ id: 42 }])),
+        sendMessage: vi.fn(() => Promise.reject(new Error('Could not establish connection'))),
+      },
+      action: { setBadgeText: vi.fn(), setBadgeBackgroundColor: vi.fn() },
+    });
+
+    vi.doMock('../logger.js', () => ({
+      createLogger: () => ({ info: vi.fn(), warn: vi.fn(), error: vi.fn(), debug: vi.fn() }),
+    }));
+    vi.doMock('../config.js', () => ({
+      config: { BACKEND_BASE_URL: 'http://localhost:3000', API_PREFIX: '/api/extension' },
+    }));
+    vi.doMock('../backendApi.js', () => ({
+      backendFetch: vi.fn(),
+    }));
+
+    const mod = await import('../fleetedgeLink.js');
+    const result = await mod.connectFleetEdge();
+    expect(result.success).toBe(false);
+    expect(result.error).toContain('Could not communicate');
+  });
+
+  it('disconnectFleetEdge clears local state', async () => {
+    const mod = await setupFleetedgeLink();
+    const result = await mod.disconnectFleetEdge();
+    expect(result.success).toBe(true);
+    expect(chrome.action.setBadgeText).toHaveBeenCalledWith({ text: '' });
   });
 });

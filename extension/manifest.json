@@ -1,26 +1,36 @@
 {
   "manifest_version": 3,
   "name": "FleetEdge Fuel Monitor",
-  "version": "1.0.1",
-  "description": "Automatically captures FleetEdge session, authenticates with backend, and processes fuel comparison tasks.",
+  "version": "2.0.0",
+  "description": "Connects to FleetEdge via user-initiated token sharing and processes fuel comparison tasks through the backend.",
   "permissions": [
-    "webRequest",
     "storage",
     "alarms",
     "notifications",
-    "scripting",
     "tabs"
   ],
   "host_permissions": [
-    "https://cvp.api.tatamotors/*",
-    "https://fleetedge.home.tatamotors/*",
     "http://localhost:*/*",
-    "https://*/*"
+    "https://fleetedge.home.tatamotors/*"
   ],
   "background": {
     "service_worker": "src/background/index.js",
     "type": "module"
   },
+  "content_scripts": [
+    {
+      "matches": ["https://fleetedge.home.tatamotors/*"],
+      "js": ["src/content/networkSpy.js"],
+      "run_at": "document_start",
+      "world": "MAIN"
+    },
+    {
+      "matches": ["https://fleetedge.home.tatamotors/*"],
+      "js": ["src/content/fleetedgeTokenReader.js"],
+      "run_at": "document_idle",
+      "world": "ISOLATED"
+    }
+  ],
   "action": {
     "default_popup": "index.html",
     "default_icon": {

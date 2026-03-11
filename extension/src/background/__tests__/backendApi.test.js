@@ -2,6 +2,9 @@
  * Unit tests for src/background/backendApi.js
  *
  * Mocks: fetch (global), chrome.storage.local, config, logger.
+ *
+ * Exports tested: login, logout, isAuthenticated, backendFetch,
+ *                 fetchVehiclesFromBackend, fetchStatus
  */
 import { describe, it, expect, vi, beforeEach } from 'vitest';
 
@@ -34,7 +37,14 @@ vi.mock('../logger.js', () => ({
   createLogger: () => ({ info: vi.fn(), warn: vi.fn(), error: vi.fn(), debug: vi.fn() }),
 }));
 
-const { login, logout, isAuthenticated, fetchPendingTasks, submitTaskResult, reportTaskError, fetchVehiclesFromBackend, fetchStatus: _FetchStatus } = await import('../backendApi.js');
+const {
+  login,
+  logout,
+  isAuthenticated,
+  backendFetch,
+  fetchVehiclesFromBackend,
+  fetchStatus,
+} = await import('../backendApi.js');
 
 function mockFetch(status, body) {
   vi.stubGlobal('fetch', vi.fn().mockResolvedValue({
@@ -79,73 +89,73 @@ describe('isAuthenticated', () => {
   });
 });
 
-// ─── fetchPendingTasks ────────────────────────────────────────────────────────
-describe('fetchPendingTasks', () => {
-  it('returns task array on success', async () => {
-    STORE.authToken = 'jwt-123';
-    const tasks = [{ id: '1', vehicle_number: 'WB25R9640' }];
-    mockFetch(200, { data: { tasks } });
-
-    const result = await fetchPendingTasks();
-    expect(result).toEqual(tasks);
+// ─── backendFetch ────────────────────────────────────────────────────────────
+describe('backendFetch', () => {
+  it('sends Authorization header from storage', async () => {
+    STORE.authToken = 'bearer-xyz';
+    mockFetch(200, { data: {} });
+    await backendFetch('/some-endpoint');
+    const [, opts] = vi.mocked(fetch).mock.calls[0];
+    expect(opts.headers['Authorization']).toBe('Bearer bearer-xyz');
   });
 
   it('uses config.BACKEND_BASE_URL when backendUrl is not in storage', async () => {
     STORE.authToken = 'jwt-123';
-    mockFetch(200, { data: { tasks: [] } });
-    await fetchPendingTasks();
+    mockFetch(200, { data: {} });
+    await backendFetch('/test');
     const [url] = vi.mocked(fetch).mock.calls[0];
     expect(url).toContain('localhost:3000');
-    expect(url).toContain('/api/extension/tasks/pending');
+    expect(url).toContain('/api/extension/test');
+  });
+
+  it('uses custom backendUrl from storage when present', async () => {
+    STORE.authToken = 'jwt-123';
+    STORE.backendUrl = 'https://custom-backend.example.com';
+    mockFetch(200, { data: {} });
+    await backendFetch('/test');
+    const [url] = vi.mocked(fetch).mock.calls[0];
+    expect(url).toContain('custom-backend.example.com');
   });
 
   it('throws when not authenticated', async () => {
     // No authToken in STORE
-    await expect(fetchPendingTasks()).rejects.toThrow('Not authenticated');
+    await expect(backendFetch('/test')).rejects.toThrow('Not authenticated');
   });
 
-  it('throws when the server returns a non-OK status', async () => {
+  it('clears auth state on 401 response', async () => {
+    STORE.authToken = 'expired-jwt';
+    STORE.authUser = { name: 'Test' };
+    mockFetch(401, { message: 'Token expired' });
+    await expect(backendFetch('/test')).rejects.toThrow();
+    expect(chrome.storage.local.remove).toHaveBeenCalledWith(['authToken', 'authUser']);
+  });
+
+  it('throws on non-OK status', async () => {
     STORE.authToken = 'jwt-123';
     mockFetch(500, { message: 'server error' });
-    await expect(fetchPendingTasks()).rejects.toThrow();
+    await expect(backendFetch('/test')).rejects.toThrow();
   });
-});
 
-// ─── submitTaskResult ────────────────────────────────────────────────────────
-describe('submitTaskResult', () => {
-  it('sends fuel_consumed and raw_response in the request body', async () => {
+  it('merges custom headers with defaults', async () => {
     STORE.authToken = 'jwt-123';
-    mockFetch(200, { data: { consumption: {} } });
-
-    await submitTaskResult('task-99', { totalFuelConsumed: 42, rawResponse: { results: [] } });
-
-    const [url, opts] = vi.mocked(fetch).mock.calls[0];
-    expect(url).toContain('/tasks/task-99/result');
-    const body = JSON.parse(opts.body);
-    expect(body).toMatchObject({ fuel_consumed: 42, raw_response: { results: [] } });
-  });
-
-  it('includes the Authorization header from storage', async () => {
-    STORE.authToken = 'bearer-xyz';
     mockFetch(200, { data: {} });
-    await submitTaskResult('task-1', { totalFuelConsumed: 0, rawResponse: {} });
+    await backendFetch('/test', { headers: { 'X-Custom': 'value' } });
     const [, opts] = vi.mocked(fetch).mock.calls[0];
-    expect(opts.headers['Authorization']).toBe('Bearer bearer-xyz');
-  });
-});
-
-// ─── reportTaskError ─────────────────────────────────────────────────────────
-describe('reportTaskError', () => {
-  it('does not throw even when the backend returns an error', async () => {
-    STORE.authToken = 'jwt-123';
-    mockFetch(500, { message: 'fail' });
-    await expect(reportTaskError('task-1', 'something went wrong')).resolves.not.toThrow();
+    expect(opts.headers['X-Custom']).toBe('value');
+    expect(opts.headers['Authorization']).toBe('Bearer jwt-123');
+    expect(opts.headers['Content-Type']).toBe('application/json');
   });
 
-  it('does not throw when fetch itself rejects (network error)', async () => {
+  it('passes method and body through to fetch', async () => {
     STORE.authToken = 'jwt-123';
-    vi.stubGlobal('fetch', vi.fn().mockRejectedValue(new Error('Network error')));
-    await expect(reportTaskError('task-1', 'error')).resolves.not.toThrow();
+    mockFetch(200, { data: {} });
+    await backendFetch('/test', {
+      method: 'POST',
+      body: JSON.stringify({ key: 'val' }),
+    });
+    const [, opts] = vi.mocked(fetch).mock.calls[0];
+    expect(opts.method).toBe('POST');
+    expect(JSON.parse(opts.body)).toEqual({ key: 'val' });
   });
 });
 
@@ -158,6 +168,24 @@ describe('fetchVehiclesFromBackend', () => {
     const result = await fetchVehiclesFromBackend();
     expect(result).toEqual(vehicles);
   });
+
+  it('returns [] when data.vehicles is missing', async () => {
+    STORE.authToken = 'jwt-123';
+    mockFetch(200, { data: {} });
+    const result = await fetchVehiclesFromBackend();
+    expect(result).toEqual([]);
+  });
+});
+
+// ─── fetchStatus ─────────────────────────────────────────────────────────────
+describe('fetchStatus', () => {
+  it('returns parsed JSON from /status endpoint', async () => {
+    STORE.authToken = 'jwt-123';
+    const statusData = { data: { taskCounts: { pending: 3, completed: 10 } } };
+    mockFetch(200, statusData);
+    const result = await fetchStatus();
+    expect(result).toEqual(statusData);
+  });
 });
 
 // ─── logout ──────────────────────────────────────────────────────────────────
@@ -166,24 +194,16 @@ describe('logout', () => {
     STORE.authToken = 'jwt-123';
     STORE.authUser = { name: 'Test' };
     await logout();
-    // chrome.storage.local.remove is mocked — verify it was called
     expect(chrome.storage.local.remove).toHaveBeenCalled();
   });
 });
 
 // ═══════════════════════════════════════════════════════════════════════════════
-// Edge Cases — ⚠️ DO NOT SKIP
+// Edge Cases — DO NOT SKIP
 // These tests guard against production failure modes discovered in real usage.
-// Skipping these has historically caused:
-//   • Silent undefined token storage → infinite re-login loops
-//   • Service worker hanging forever on backend timeouts
-//   • Stale auth state after 401 → user stuck until manual cache clear
 // ═══════════════════════════════════════════════════════════════════════════════
 
 describe('Edge Cases', () => {
-  // WHY THIS MATTERS: If the backend returns an unexpected response shape (e.g.
-  // { data: {} } with no token), the old code would silently store undefined as
-  // the auth token and then crash on user.name. The fix validates the response.
   it('login rejects when response.json() has no data.token', async () => {
     mockFetch(200, { data: {} });
     await expect(login('test@test.com', 'pass')).rejects.toThrow('missing token');
@@ -194,40 +214,21 @@ describe('Edge Cases', () => {
     await expect(login('test@test.com', 'pass')).rejects.toThrow('missing token');
   });
 
-  // WHY THIS MATTERS: A 401 that doesn't clear auth state causes the user to
-  // get stuck — every subsequent request sends the expired token and gets 401
-  // again. Clearing storage forces a fresh login flow.
-  it('401 from fetchPendingTasks clears authToken + authUser from storage', async () => {
+  it('401 from backendFetch clears authToken + authUser from storage', async () => {
     STORE.authToken = 'expired-jwt';
     STORE.authUser = { name: 'Test' };
     mockFetch(401, { message: 'Token expired' });
-
-    await expect(fetchPendingTasks()).rejects.toThrow();
+    await expect(backendFetch('/test')).rejects.toThrow();
     expect(chrome.storage.local.remove).toHaveBeenCalledWith(['authToken', 'authUser']);
   });
 
-  // WHY THIS MATTERS: If the backend returns { data: {} } without a vehicles
-  // array, the code must return [] — not crash with "cannot iterate undefined".
-  it('fetchVehiclesFromBackend returns [] when data.vehicles is missing', async () => {
-    STORE.authToken = 'jwt-123';
-    mockFetch(200, { data: {} });
-    const result = await fetchVehiclesFromBackend();
-    expect(result).toEqual([]);
-  });
-
-  // WHY THIS MATTERS: If the backend hangs (e.g. database lock, network partition),
-  // the extension service worker stays stuck forever. The 15s AbortController timeout
-  // ensures the request fails with a clear error. Without this, Chrome kills the
-  // service worker after 5 minutes — silently losing the in-flight operation.
   it('AbortError from fetch is converted to a descriptive timeout message', async () => {
     STORE.authToken = 'jwt-123';
-
     vi.stubGlobal('fetch', vi.fn(() => {
       const err = new Error('The operation was aborted');
       err.name = 'AbortError';
       return Promise.reject(err);
     }));
-
-    await expect(fetchPendingTasks()).rejects.toThrow('timed out');
+    await expect(backendFetch('/test')).rejects.toThrow('timed out');
   });
 });

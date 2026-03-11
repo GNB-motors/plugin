@@ -15,10 +15,10 @@ export const LAYERS = Object.freeze({
   UI:        'UI',        // Popup / content interactions
   MESSAGE:   'MESSAGE',   // chrome.runtime messaging
   BACKEND:   'BACKEND',   // Backend HTTP calls
-  FLEETEDGE: 'FLEETEDGE', // FleetEdge / CVP API calls
+  FLEETEDGE: 'FLEETEDGE', // FleetEdge connection & backend proxy status
   STORAGE:   'STORAGE',   // chrome.storage operations
-  TOKEN:     'TOKEN',     // Token capture / validation
-  TASK:      'TASK',      // Task polling / processing
+  TOKEN:     'TOKEN',     // FleetEdge token reading (content script)
+  TASK:      'TASK',      // Backend-side task processing events
 });
 
 export const SEVERITY = Object.freeze({
