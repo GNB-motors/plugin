@@ -46,8 +46,7 @@ export async function login(emailOrMobile, password) {
   logger.info('Logging in to backend...');
   bTel.perfStart('login');
 
-  const store = await getStorage(['backendUrl']);
-  let baseUrl = store.backendUrl || config.BACKEND_BASE_URL;
+  let baseUrl = config.BACKEND_BASE_URL;
   if (baseUrl.endsWith('/')) baseUrl = baseUrl.slice(0, -1);
   const url = `${baseUrl}${config.API_PREFIX}/auth/login`;
 
@@ -100,8 +99,8 @@ export async function logout() {
  * can reuse it for FleetEdge proxy endpoints.
  */
 export async function backendFetch(path, options = {}) {
-  const store = await getStorage(['backendUrl', 'authToken']);
-  let baseUrl = store.backendUrl || config.BACKEND_BASE_URL;
+  const store = await getStorage(['authToken']);
+  let baseUrl = config.BACKEND_BASE_URL;
   if (baseUrl.endsWith('/')) baseUrl = baseUrl.slice(0, -1);
   const token = store.authToken;
   const url = `${baseUrl}${config.API_PREFIX}${path}`;

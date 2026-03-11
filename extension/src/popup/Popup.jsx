@@ -13,11 +13,9 @@ function formatRelativeTime(isoOrMs) {
 }
 
 // ─── Login Screen ────────────────────────────────────────────────────────────
-function LoginView({ onLogin, backendUrl, onSetBackendUrl }) {
+function LoginView({ onLogin }) {
   const [emailOrMobile, setEmailOrMobile] = useState('');
   const [password, setPassword] = useState('');
-  const [urlInput, setUrlInput] = useState(backendUrl || '');
-  const [showUrl, setShowUrl] = useState(false);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState('');
 
@@ -41,24 +39,17 @@ function LoginView({ onLogin, backendUrl, onSetBackendUrl }) {
     }
   }, [emailOrMobile, password, onLogin]);
 
-  const handleSaveUrl = useCallback(async () => {
-    if (!urlInput.trim()) return;
-    try {
-      await chrome.runtime.sendMessage({ type: 'SET_BACKEND_URL', url: urlInput.trim() });
-      onSetBackendUrl(urlInput.trim());
-    } catch (err) {
-      setError(err.message);
-    }
-  }, [urlInput, onSetBackendUrl]);
-
   return (
-    <div className="popup login-view">
-      <div className="login-header">
+    <div className="popup login-view fade-in">
+      <div className="login-header slide-down">
+        <div className="login-logo">
+          <svg viewBox="0 0 24 24" width="32" height="32" stroke="currentColor" strokeWidth="2" fill="none" strokeLinecap="round" strokeLinejoin="round"><rect x="2" y="3" width="14" height="14" rx="2"></rect><path d="M16 8l4 2v6h-4"></path><circle cx="6" cy="18" r="2"></circle><circle cx="16" cy="18" r="2"></circle></svg>
+        </div>
         <h1>FleetEdge Monitor</h1>
-        <p className="login-subtitle">Sign in to connect</p>
+        <p className="login-subtitle">Secure connection to your fleet data</p>
       </div>
 
-      <form className="login-form" onSubmit={handleSubmit}>
+      <form className="login-form slide-up" onSubmit={handleSubmit}>
         <div className="input-group">
           <label>Email or Mobile</label>
           <input
@@ -92,25 +83,6 @@ function LoginView({ onLogin, backendUrl, onSetBackendUrl }) {
         </button>
       </form>
 
-      <div className="url-toggle">
-        <button onClick={() => setShowUrl((s) => !s)} className="btn-link">
-          {showUrl ? 'Hide' : 'Configure'} Backend URL
-        </button>
-      </div>
-
-      {showUrl && (
-        <div className="url-config">
-          <div className="input-row">
-            <input
-              type="text"
-              placeholder="https://api.example.com"
-              value={urlInput}
-              onChange={(e) => setUrlInput(e.target.value)}
-            />
-            <button onClick={handleSaveUrl}>Save</button>
-          </div>
-        </div>
-      )}
     </div>
   );
 }
@@ -118,9 +90,7 @@ function LoginView({ onLogin, backendUrl, onSetBackendUrl }) {
 // ─── Main Popup ──────────────────────────────────────────────────────────────
 function Popup() {
   const [status, setStatus] = useState(null);
-  const [backendUrl, setBackendUrl] = useState('');
   const [showLogs, setShowLogs] = useState(false);
-  const [showSettings, setShowSettings] = useState(false);
   const [logs, setLogs] = useState([]);
   const [loading, setLoading] = useState(true);
   const [actionMsg, setActionMsg] = useState('');
@@ -138,7 +108,6 @@ function Popup() {
     try {
       const res = await chrome.runtime.sendMessage({ type: 'GET_STATUS' });
       setStatus(res);
-      if (res.backendUrl) setBackendUrl(res.backendUrl);
     } catch (err) {
       console.error('Failed to get status:', err);
     } finally {
@@ -230,44 +199,35 @@ function Popup() {
     refreshStatus();
   }, [flash, refreshStatus]);
 
-  const handleSaveUrl = useCallback(async () => {
-    if (!backendUrl.trim()) return;
-    try {
-      await chrome.runtime.sendMessage({ type: 'SET_BACKEND_URL', url: backendUrl.trim() });
-      flash('Backend URL saved \u2713');
-      refreshStatus();
-    } catch (err) {
-      flash(`Error: ${err.message}`);
-    }
-  }, [backendUrl, flash, refreshStatus]);
-
   /* ---------- Render ---------- */
 
   if (loading && !status) {
-    return <div className="popup"><p className="loading">Loading...</p></div>;
+    return <div className="popup glass-container centered"><span className="loader"></span></div>;
   }
 
   // Show login screen if not authenticated
   if (!status?.authenticated) {
     return (
       <LoginView
-        backendUrl={backendUrl}
         onLogin={() => refreshStatus()}
-        onSetBackendUrl={(url) => { setBackendUrl(url); flash('Backend URL saved \u2713'); }}
       />
     );
   }
 
   if (showLogs) {
     return (
-      <div className="popup logs-view">
+      <div className="popup logs-view glass-container slide-left">
         <div className="logs-header">
-          <h1>Logs ({logs.length})</h1>
-          <button onClick={() => setShowLogs(false)} className="btn-back">&larr; Back</button>
+          <h1>System Logs</h1>
+          <span className="log-count">{logs.length} entries</span>
+          <button onClick={() => setShowLogs(false)} className="btn-back">
+            <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M19 12H5M12 19l-7-7 7-7"/></svg>
+            Back
+          </button>
         </div>
         <div className="logs-actions">
-          <button onClick={handleViewLogs} className="btn-refresh">Refresh</button>
-          <button onClick={handleClearLogs} className="btn-danger">Clear</button>
+          <button onClick={handleViewLogs} className="btn-refresh glass-btn">Refresh</button>
+          <button onClick={handleClearLogs} className="btn-danger glass-btn">Clear logs</button>
         </div>
         <div className="logs-container">
           {logs.length === 0 ? (
@@ -294,28 +254,33 @@ function Popup() {
   const user = status?.user;
 
   return (
-    <div className="popup">
-      <div className="header">
-        <h1>FleetEdge Monitor</h1>
-        <div className="header-actions">
-          <button onClick={() => setShowSettings(s => !s)} className="btn-settings" title="Settings">
-            &#9881;
-          </button>
+    <div className="popup glass-container fade-in">
+      <div className="header glow-border-bottom">
+        <div className="header-brand">
+          <div className="logo-mark"><svg viewBox="0 0 24 24" width="20" height="20" stroke="currentColor" strokeWidth="2" fill="none" strokeLinecap="round" strokeLinejoin="round"><rect x="2" y="3" width="14" height="14" rx="2"></rect><path d="M16 8l4 2v6h-4"></path><circle cx="6" cy="18" r="2"></circle><circle cx="16" cy="18" r="2"></circle></svg></div>
+          <h1>FleetEdge Monitor</h1>
         </div>
       </div>
 
       {/* User info bar */}
-      <div className="user-bar">
-        <span className="user-name">{user?.name || 'User'}</span>
-        <span className="user-role">{user?.role || ''}</span>
+      <div className="user-bar glass-panel">
+        <div className="user-info">
+          <div className="user-avatar">{user?.name ? user.name.charAt(0).toUpperCase() : 'U'}</div>
+          <div>
+            <span className="user-name">{user?.name || 'User'}</span>
+            <span className="user-role">{user?.role || ''}</span>
+          </div>
+        </div>
         <button onClick={handleLogout} className="btn-logout" title="Sign out">
           Sign Out
         </button>
       </div>
 
-      {/* FleetEdge Connection */}
-      <section className="status-section">
-        <h2>FleetEdge Connection</h2>
+      {/* View Wrapper for animations */}
+      <div className="main-content-flow slide-up">
+        {/* FleetEdge Connection */}
+        <section className="status-section">
+          <h2>FleetEdge Connection</h2>
         {fe?.status === 'linked' ? (
           <>
             <div className="status-badge valid">
@@ -367,39 +332,36 @@ function Popup() {
       {/* Backend Task Status */}
       {bs && (
         <section className="status-section">
-          <h2>Task Status</h2>
-          <div className="metrics-grid">
-            <span className="metric-label">Pending</span>
-            <span className="metric-value">{bs.pending ?? 0}</span>
-            <span className="metric-label">Completed</span>
-            <span className="metric-value">{bs.completed ?? 0}</span>
-            <span className="metric-label">Failed</span>
-            <span className="metric-value error">{bs.failed ?? 0}</span>
-            <span className="metric-label">Flagged</span>
-            <span className="metric-value warning">{bs.flagged ?? 0}</span>
-            <span className="metric-label">Last sync</span>
-            <span className="metric-value">{formatRelativeTime(bs.lastSyncAt)}</span>
-          </div>
-          {bs.isUpToDate && (
-            <p className="detail" style={{ color: '#22c55e', marginTop: '4px' }}>&#10003; All tasks processed</p>
-          )}
-        </section>
-      )}
-
-      {showSettings && (
-        <section className="settings-section">
-          <h2>Settings</h2>
-          <div className="input-group">
-            <label>Backend URL</label>
-            <div className="input-row">
-              <input
-                type="text"
-                placeholder="https://api.example.com"
-                value={backendUrl}
-                onChange={(e) => setBackendUrl(e.target.value)}
-              />
-              <button onClick={handleSaveUrl}>Save</button>
+          <h2>Task Status Overview</h2>
+          <div className="metrics-grid glass-panel">
+            <div className="metric-box">
+              <span className="metric-label">Pending</span>
+              <span className="metric-value pending-val">{bs.pending ?? 0}</span>
             </div>
+            <div className="metric-box">
+              <span className="metric-label">Completed</span>
+              <span className="metric-value success-val">{bs.completed ?? 0}</span>
+            </div>
+            <div className="metric-box">
+              <span className="metric-label">Failed</span>
+              <span className="metric-value error-val">{bs.failed ?? 0}</span>
+            </div>
+            <div className="metric-box">
+              <span className="metric-label">Flagged</span>
+              <span className="metric-value warning-val">{bs.flagged ?? 0}</span>
+            </div>
+          </div>
+          <div className="sync-footer">
+            <div className="sync-time">
+              <svg viewBox="0 0 24 24" width="12" height="12" stroke="currentColor" strokeWidth="2" fill="none" strokeLinecap="round" strokeLinejoin="round"><circle cx="12" cy="12" r="10"></circle><polyline points="12 6 12 12 16 14"></polyline></svg>
+              <span>{formatRelativeTime(bs.lastSyncAt)}</span>
+            </div>
+            {bs.isUpToDate && (
+              <span className="sync-status-ok">
+                <svg viewBox="0 0 24 24" width="12" height="12" stroke="currentColor" strokeWidth="2" fill="none" strokeLinecap="round" strokeLinejoin="round"><path d="M22 11.08V12a10 10 0 1 1-5.93-9.14"></path><polyline points="22 4 12 14.01 9 11.01"></polyline></svg>
+                All tasks processed
+              </span>
+            )}
           </div>
         </section>
       )}
@@ -408,19 +370,24 @@ function Popup() {
         <button
           onClick={handleTriggerProcess}
           disabled={fe?.status !== 'linked'}
-          className="btn-primary"
+          className="btn-primary btn-process"
         >
-          &#9654; Process Tasks Now
+          <svg viewBox="0 0 24 24" width="16" height="16" stroke="currentColor" strokeWidth="2" fill="none" strokeLinecap="round" strokeLinejoin="round"><path d="M5 3l14 9-14 9V3z"></path></svg>
+          Process Tasks Now
         </button>
-        <button onClick={handleViewLogs} className="btn-secondary">
-          &#128203; View Logs
-        </button>
-        <button onClick={handleClearAll} className="btn-danger">
-          &#10007; Clear All Data
-        </button>
+        <div className="action-row">
+          <button onClick={handleViewLogs} className="btn-secondary">
+            View Logs
+          </button>
+          <button onClick={handleClearAll} className="btn-danger">
+            Clear Data
+          </button>
+        </div>
       </section>
 
-      {actionMsg && <p className="action-msg">{actionMsg}</p>}
+      {actionMsg && <div className="action-msg-toast slide-up">{actionMsg}</div>}
+      
+      </div> {/* End view wrapper */}
     </div>
   );
 }
