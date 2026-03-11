@@ -417,7 +417,7 @@ describe('fleetedgeLink — v2 improvements', () => {
     vi.restoreAllMocks();
     vi.resetModules();
 
-    const { store, chromeMock } = makeStore();
+    const { chromeMock } = makeStore();
     vi.stubGlobal('chrome', chromeMock);
 
     vi.doMock('../logger.js', () => ({
@@ -457,7 +457,7 @@ describe('fleetedgeLink — v2 improvements', () => {
     vi.restoreAllMocks();
     vi.resetModules();
 
-    const { store, chromeMock } = makeStore();
+    const { chromeMock } = makeStore();
     vi.stubGlobal('chrome', chromeMock);
 
     vi.doMock('../logger.js', () => ({
@@ -541,7 +541,7 @@ describe('fleetedgeLink — v2 improvements', () => {
     vi.restoreAllMocks();
     vi.resetModules();
 
-    const { store, chromeMock } = makeStore();
+    const { chromeMock } = makeStore();
     vi.stubGlobal('chrome', chromeMock);
 
     vi.doMock('../logger.js', () => ({
@@ -692,7 +692,7 @@ describe('index.js — v2 improvements (handleMessage logic)', () => {
 
     // telemetry.js mock — index.js calls startTelemetry() at load time
     vi.doMock('../telemetry.js', () => {
-      const makeMethod = (sev) => vi.fn();
+      const makeMethod = () => vi.fn();
       const createLayerLogger = () => ({
         debug: makeMethod('DEBUG'), info: makeMethod('INFO'), warn: makeMethod('WARN'),
         error: makeMethod('ERROR'), fatal: makeMethod('FATAL'),
@@ -715,14 +715,14 @@ describe('index.js — v2 improvements (handleMessage logic)', () => {
     });
 
     // Import index.js — side effects fire (alarms, etc.)
-    const mod = await import('../index.js');
+    await import('../index.js');
 
     // Extract the message handler from chrome.runtime.onMessage.addListener
     const messageHandler = chrome.runtime.onMessage.addListener.mock.calls[0]?.[0];
 
     // Helper to call a message and get the response
     async function sendMessage(message) {
-      return new Promise((resolve, reject) => {
+      return new Promise((resolve) => {
         const sendResponse = (response) => resolve(response);
         const result = messageHandler(message, {}, sendResponse);
         // If returns false, no async — resolve immediately
