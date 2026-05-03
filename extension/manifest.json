@@ -1,16 +1,17 @@
 {
   "manifest_version": 3,
-  "name": "FleetEdge Fuel Monitor",
-  "version": "2.0.0",
-  "description": "Connects to FleetEdge via user-initiated token sharing and processes fuel comparison tasks through the backend.",
+  "name": "gnbedge",
+  "version": "0.0.0.1",
+  "description": "Connects to your fleet telematics provider and audits fuel consumption tasks through your organization backend.",
   "permissions": [
     "storage",
     "alarms",
-    "notifications",
-    "tabs"
+    "notifications"
   ],
   "host_permissions": [
-    "http://localhost:*/*",
+    "https://api.app.gnbedge.in/*"
+  ],
+  "optional_host_permissions": [
     "https://fleetedge.home.tatamotors/*"
   ],
   "background": {

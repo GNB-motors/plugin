@@ -7,7 +7,7 @@ import manifest from './manifest.json';
 export default defineConfig({
   plugins: [react(), crx({ manifest })],
   build: {
-    sourcemap: 'hidden',
+    sourcemap: false,
   },
   test: {
     environment: 'node',

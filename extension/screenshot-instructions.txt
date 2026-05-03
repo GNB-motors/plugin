@@ -1,0 +1,58 @@
+SCREENSHOT + PROMO TILE — fastest paths
+========================================
+
+Required for Chrome Web Store submission:
+  • 1 screenshot at 1280×800 (PNG or JPEG)
+  • 1 small promo tile at 440×280 (PNG or JPEG)
+
+----------------------------------------
+SCREENSHOT (1280×800)
+----------------------------------------
+
+OPTION A — capture the real popup, then frame it
+  1. Load the unpacked dist/ in chrome://extensions
+  2. Open the popup, sign in, get to the main view
+  3. Press Ctrl+Shift+I in the popup, then Ctrl+Shift+P
+     → "Capture node screenshot" on the <body> element
+  4. Open the resulting PNG in Paint.NET / GIMP / Figma / Canva
+  5. Create a 1280×800 canvas with a solid color background
+     (suggested: #1e40af or #0f172a)
+  6. Center the popup screenshot, add a 1-line caption like
+     "One-click fleet telematics audits"
+  7. Export as PNG.
+
+OPTION B — Canva template (fastest)
+  1. canva.com → search "Chrome extension screenshot"
+  2. Pick any 1280×800 template
+  3. Replace the placeholder image with your popup screenshot
+  4. Replace the headline text with: "gnbedge — fleet fuel audits"
+  5. Download as PNG.
+
+----------------------------------------
+PROMO TILE (440×280)
+----------------------------------------
+
+OPTION A — Canva
+  1. Custom size 440×280
+  2. Background: solid #1e40af
+  3. Place icon128.png (or a 200px version) on the left
+  4. Right side text:
+       Title: gnbedge
+       Tagline: Fleet fuel audits, automated.
+  5. Download as PNG.
+
+OPTION B — Figma
+  1. New frame 440×280, fill #1e40af
+  2. Drop in icon128.png at 180×180, left-aligned
+  3. Text frame on right with title + tagline (above)
+  4. Export as PNG.
+
+----------------------------------------
+CHEAT: even simpler
+----------------------------------------
+A screenshot of the popup pasted onto a colored 1280×800 canvas
+with no text at all is enough to pass review. The promo tile can
+be just the icon centered on a solid background.
+
+Save both PNGs anywhere — you upload them in the dashboard form,
+they don't need to live in the repo.

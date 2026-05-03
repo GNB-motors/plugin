@@ -32,7 +32,18 @@ export async function connectFleetEdge() {
   logger.info('Connecting to FleetEdge...');
   feTel.perfStart('connect');
 
-  // 1. Find an open FleetEdge tab
+  // 1. Verify optional host permission is granted before querying tabs.
+  const hasPermission = await chrome.permissions.contains({
+    origins: ['https://fleetedge.home.tatamotors/*'],
+  });
+  if (!hasPermission) {
+    const error = 'Fleet portal access not yet allowed — click Connect to grant permission first';
+    logger.warn(error);
+    feTel.perfEnd('connect');
+    return { success: false, error };
+  }
+
+  // 2. Find an open FleetEdge tab
   const tabs = await chrome.tabs.query({ url: 'https://fleetedge.home.tatamotors/*' });
   if (!tabs.length) {
     const error = 'No FleetEdge tab open — please open FleetEdge and log in first';

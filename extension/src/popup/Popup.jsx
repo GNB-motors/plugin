@@ -45,7 +45,7 @@ function LoginView({ onLogin }) {
         <div className="login-logo">
           <svg viewBox="0 0 24 24" width="32" height="32" stroke="currentColor" strokeWidth="2" fill="none" strokeLinecap="round" strokeLinejoin="round"><rect x="2" y="3" width="14" height="14" rx="2"></rect><path d="M16 8l4 2v6h-4"></path><circle cx="6" cy="18" r="2"></circle><circle cx="16" cy="18" r="2"></circle></svg>
         </div>
-        <h1>FleetEdge Monitor</h1>
+        <h1>gnbedge</h1>
         <p className="login-subtitle">Secure connection to your fleet data</p>
       </div>
 
@@ -133,11 +133,19 @@ function Popup() {
 
   const handleConnectFleetEdge = useCallback(async () => {
     setConnecting(true);
-    flash('Connecting to FleetEdge...');
     try {
+      // Request optional host permission \u2014 must be in a user-gesture handler.
+      const granted = await chrome.permissions.request({
+        origins: ['https://fleetedge.home.tatamotors/*'],
+      });
+      if (!granted) {
+        flash('Permission denied \u2014 allow access to the fleet portal to connect');
+        return;
+      }
+      flash('Connecting to fleet portal...');
       const res = await chrome.runtime.sendMessage({ type: 'CONNECT_FLEETEDGE' });
       if (res.success) {
-        flash(`FleetEdge connected \u2713 (${res.vehicleCount} vehicles)`);
+        flash(`Fleet portal connected \u2713 (${res.vehicleCount} vehicles) \u2014 refresh any open fleet portal tabs`);
       } else {
         flash(res.error || 'Connection failed');
       }
@@ -152,7 +160,7 @@ function Popup() {
   const handleDisconnectFleetEdge = useCallback(async () => {
     try {
       await chrome.runtime.sendMessage({ type: 'DISCONNECT_FLEETEDGE' });
-      flash('FleetEdge disconnected');
+      flash('Fleet portal disconnected');
       refreshStatus();
     } catch (err) {
       flash(`Error: ${err.message}`);
@@ -193,7 +201,7 @@ function Popup() {
   }, [flash]);
 
   const handleClearAll = useCallback(async () => {
-    if (!confirm('Clear all stored data and disconnect FleetEdge?')) return;
+    if (!confirm('Clear all stored data and disconnect the fleet portal?')) return;
     await chrome.runtime.sendMessage({ type: 'CLEAR_ALL' });
     flash('All data cleared');
     refreshStatus();
@@ -258,7 +266,7 @@ function Popup() {
       <div className="header glow-border-bottom">
         <div className="header-brand">
           <div className="logo-mark"><svg viewBox="0 0 24 24" width="20" height="20" stroke="currentColor" strokeWidth="2" fill="none" strokeLinecap="round" strokeLinejoin="round"><rect x="2" y="3" width="14" height="14" rx="2"></rect><path d="M16 8l4 2v6h-4"></path><circle cx="6" cy="18" r="2"></circle><circle cx="16" cy="18" r="2"></circle></svg></div>
-          <h1>FleetEdge Monitor</h1>
+          <h1>gnbedge</h1>
         </div>
       </div>
 
@@ -280,7 +288,7 @@ function Popup() {
       <div className="main-content-flow slide-up">
         {/* FleetEdge Connection */}
         <section className="status-section">
-          <h2>FleetEdge Connection</h2>
+          <h2>Fleet Portal Connection</h2>
         {fe?.status === 'linked' ? (
           <>
             <div className="status-badge valid">
@@ -298,32 +306,32 @@ function Popup() {
               &#10007; Session expired &mdash; please re-connect
             </div>
             <p className="detail hint">
-              1. Open FleetEdge and log in<br/>
-              2. Click &quot;Connect FleetEdge&quot; below
+              1. Open the fleet portal and log in<br/>
+              2. Click &quot;Connect Fleet Portal&quot; below
             </p>
             <button
               onClick={handleConnectFleetEdge}
               disabled={connecting}
               className="btn-primary"
             >
-              {connecting ? 'Connecting...' : '\u{1F517} Re-connect FleetEdge'}
+              {connecting ? 'Connecting...' : '\u{1F517} Re-connect Fleet Portal'}
             </button>
           </>
         ) : (
           <>
             <div className="status-badge inactive">
-              Not connected &mdash; link your FleetEdge session
+              Not connected &mdash; link your fleet portal session
             </div>
             <p className="detail hint">
               1. Open <strong>fleetedge.home.tatamotors</strong> and log in<br/>
-              2. Click &quot;Connect FleetEdge&quot; below
+              2. Click &quot;Connect Fleet Portal&quot; below
             </p>
             <button
               onClick={handleConnectFleetEdge}
               disabled={connecting}
               className="btn-primary"
             >
-              {connecting ? 'Connecting...' : '\u{1F517} Connect FleetEdge'}
+              {connecting ? 'Connecting...' : '\u{1F517} Connect Fleet Portal'}
             </button>
           </>
         )}
