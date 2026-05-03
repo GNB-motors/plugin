@@ -133,6 +133,7 @@ describe('fleetedgeLink - edge cases', () => {
         query: vi.fn(() => Promise.resolve(tabsResult)),
         sendMessage: vi.fn(() => Promise.resolve(sendMessageResult)),
       },
+      permissions: { contains: vi.fn(() => Promise.resolve(true)) },
       action: { setBadgeText: vi.fn(), setBadgeBackgroundColor: vi.fn() },
     });
 
@@ -215,6 +216,7 @@ describe('fleetedgeLink - edge cases', () => {
         query: vi.fn(() => Promise.resolve([{ id: 42 }])),
         sendMessage: vi.fn(() => Promise.reject(new Error('Could not establish connection'))),
       },
+      permissions: { contains: vi.fn(() => Promise.resolve(true)) },
       action: { setBadgeText: vi.fn(), setBadgeBackgroundColor: vi.fn() },
     });
 

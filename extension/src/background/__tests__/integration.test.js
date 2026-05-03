@@ -39,6 +39,7 @@ vi.stubGlobal('chrome', {
   },
   notifications: { create: vi.fn() },
   tabs: { query: vi.fn(() => Promise.resolve([])), sendMessage: vi.fn() },
+  permissions: { contains: vi.fn(() => Promise.resolve(true)) },
 });
 
 vi.mock('../config.js', () => ({
