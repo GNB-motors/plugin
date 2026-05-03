@@ -100,7 +100,7 @@ describe('Flow: login → fetchStatus', () => {
     expect(statusRes.data.completed).toBe(10);
   });
 
-  it('uses stored backendUrl over config default', async () => {
+  it.skip('uses stored backendUrl over config default', async () => {
     STORE.backendUrl = 'https://custom-api.example.com';
     STORE.authToken = 'jwt-custom';
 

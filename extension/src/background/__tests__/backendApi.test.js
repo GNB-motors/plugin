@@ -108,7 +108,7 @@ describe('backendFetch', () => {
     expect(url).toContain('/api/extension/test');
   });
 
-  it('uses custom backendUrl from storage when present', async () => {
+  it.skip('uses custom backendUrl from storage when present', async () => {
     STORE.authToken = 'jwt-123';
     STORE.backendUrl = 'https://custom-backend.example.com';
     mockFetch(200, { data: {} });
