@@ -2,6 +2,33 @@
 
 ---
 
+## [2026-05-10] — branch: updated-design
+
+### Auto-refresh FleetEdge tab on connect failure
+
+#### Background change (`src/background/fleetedgeLink.js`)
+
+When `chrome.tabs.sendMessage` fails with **"Could not establish connection. Receiving end does not exist."** (content script not yet injected — typically when the FleetEdge tab has just loaded or was never focused), `connectFleetEdge()` now:
+
+1. Calls `chrome.tabs.reload(tab.id)` to force a full page reload.
+2. Waits 3 seconds for the page to finish loading and for the content script to be injected by Chrome.
+3. Retries `sendMessage` once.
+
+If the retry also fails, a clear error message is returned: `"Could not communicate with FleetEdge page after refresh — please try again"`.
+
+Any other `sendMessage` error (non-connection errors) skips the reload and returns the original error immediately.
+
+**No manifest changes required.** No new permissions are used — `chrome.tabs.reload` is allowed for tabs the extension already has permission to access via `optional_host_permissions`. The extension zip does **not** need to be rebuilt unless you want this fix in production; the behaviour change is purely in the service worker JavaScript.
+
+#### Test changes
+
+- `edge-cases-integration.test.js` — Added `chrome.tabs.reload: vi.fn()` to the chrome stub in the `connectFleetEdge handles sendMessage error gracefully` test. Updated the mock error message to include `"Receiving end does not exist"` so the new retry branch is exercised.
+- `edge-cases-v2.test.js` — Added `chrome.tabs.reload: vi.fn()` to the shared `makeStore()` chrome mock so all `fleetedgeLink` tests pass.
+
+All 187 tests pass (2 skipped — pre-existing backendUrl tests).
+
+---
+
 ## [2026-05-09] — branch: Devayan
 
 ### Backend integration: Multi-FleetEdge-Account ingestion (extension path)

@@ -65,7 +65,7 @@ graph LR
 
 1. **Token Reading** — We leverage Manifest V3's official `world: "MAIN"` execution environment. A stealth script (`networkSpy.js`) runs natively in the FleetEdge page context to intercept `window.fetch` and `XMLHttpRequest`. When the Single Page Application makes a request, the spy grabs the live `Authorization` header mid-flight and securely passes it to our isolated extension script (`fleetedgeTokenReader.js`) via `window.postMessage`. This completely bypasses any localStorage obfuscation while maintaining 100% CWS compliance (no string evaluation).
 
-2. **Token Linking** — The service worker sends the discovered token to `POST /api/extension/fleetedge/link-token`. The backend validates the token against the FleetEdge CVP API before storing it. If validation fails, the token is rejected.
+2. **Token Linking** — The service worker sends the discovered token to `POST /api/extension/fleetedge/link-token`. The backend validates the token against the FleetEdge CVP API before storing it, and fetches the FleetEdge user profile (`get-user-document-master`) to give the account a human-readable name (e.g. "Ajit Kumar Singh (user@email.com)"). If validation fails, the token is rejected. If the content script is not yet injected when "Connect FleetEdge" is clicked (e.g. the tab just loaded), the extension automatically reloads the FleetEdge tab, waits 3 seconds for injection, and retries once before reporting an error.
 
 3. **Backend Task Processing** — A cron job (`FleetEdgeCronService`) runs every 5 minutes. For each organization with a linked FleetEdge token, it:
    - Finds all pending fuel comparison tasks
@@ -258,7 +258,7 @@ extension/
 │   │   ├── logger.js                 # Batched logging (buffer → flush every 2s)
 │   │   ├── telemetry.js              # LEMU telemetry (7-layer logger)
 │   │   ├── utils.js                  # JWT decode, IST→UTC, retry, metrics
-│   │   └── __tests__/               # Vitest unit tests (153 tests)
+│   │   └── __tests__/               # Vitest unit tests (187 tests)
 │   ├── content/
 │   │   └── fleetedgeTokenReader.js   # Declared content script (reads FleetEdge JWT)
 │   └── popup/
@@ -288,7 +288,7 @@ When running `npm run dev`, load the extension from the project root (not `dist/
 
 | Problem | Solution |
 |---------|----------|
-| "Connect FleetEdge" fails | Open FleetEdge in a tab and log in first. The content script needs an active FleetEdge page with a token in localStorage |
+| "Connect FleetEdge" fails | Open FleetEdge in a tab and log in first. If the tab just loaded, the extension will auto-refresh it and retry — wait a few seconds and try again |
 | Status shows "Expired" | Log into FleetEdge again in any tab, then click "Connect FleetEdge" to re-link |
 | Tasks not processing | Check backend logs. The cron runs every 5 minutes. Click "Process Tasks Now" to trigger immediately |
 | Vehicle count is 0 | Backend fetches vehicles via FleetEdge proxy. Check FleetEdge token is linked and valid |
