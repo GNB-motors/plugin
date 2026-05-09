@@ -59,17 +59,35 @@ export async function connectFleetEdge() {
     : tabs[0];
   logger.info(`Found FleetEdge tab: ${tab.id}${tabs.length > 1 ? ` (picked from ${tabs.length} tabs)` : ''}`);
 
-  // 2. Ask the content script to read the token
+  // 2. Ask the content script to read the token; auto-refresh tab once if not injected yet
   let tokenResult;
   try {
     tokenResult = await chrome.tabs.sendMessage(tab.id, { type: 'READ_FLEETEDGE_TOKEN' });
   } catch (err) {
-    // Content script might not be injected yet (e.g., page just loaded)
-    const error = 'Could not communicate with FleetEdge page — try refreshing the FleetEdge tab';
-    logger.error(error, err.message);
-    tokenTel.error('Content script communication failed', { tabId: tab.id, reason: err.message });
-    feTel.perfEnd('connect');
-    return { success: false, error };
+    const isNoReceiver = err.message?.includes('Could not establish connection') ||
+                         err.message?.includes('Receiving end does not exist');
+    if (isNoReceiver) {
+      logger.info('Content script not ready — reloading FleetEdge tab and retrying...');
+      tokenTel.info('Reloading tab for content script injection', { tabId: tab.id });
+      chrome.tabs.reload(tab.id);
+      // Wait for the page to load and content script to inject (~3s)
+      await new Promise((resolve) => setTimeout(resolve, 3000));
+      try {
+        tokenResult = await chrome.tabs.sendMessage(tab.id, { type: 'READ_FLEETEDGE_TOKEN' });
+      } catch (retryErr) {
+        const error = 'Could not communicate with FleetEdge page after refresh — please try again';
+        logger.error(error, retryErr.message);
+        tokenTel.error('Content script communication failed after retry', { tabId: tab.id, reason: retryErr.message });
+        feTel.perfEnd('connect');
+        return { success: false, error };
+      }
+    } else {
+      const error = 'Could not communicate with FleetEdge page — try refreshing the FleetEdge tab';
+      logger.error(error, err.message);
+      tokenTel.error('Content script communication failed', { tabId: tab.id, reason: err.message });
+      feTel.perfEnd('connect');
+      return { success: false, error };
+    }
   }
 
   if (!tokenResult || !tokenResult.success) {
