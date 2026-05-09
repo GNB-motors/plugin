@@ -2,6 +2,38 @@
 
 ---
 
+## [2026-05-09] — branch: Devayan
+
+### Backend integration: Multi-FleetEdge-Account ingestion (extension path)
+
+No extension source files changed this session. The following backend changes affect how extension-originated data is attributed:
+
+#### Account tagging for extension-sourced data
+
+The backend now maintains a `FleetEdgeAccount` row per `{orgId, source:'EXTENSION', externalAccountId}`. The `externalAccountId` is extracted from the `fleetId` claim in the JWT that `FleetEdgeProxyService.linkToken` already decodes.
+
+- Every snapshot or vehicle event that arrives via the extension proxy is now tagged with the matched `FleetEdgeAccount._id`.
+- If the same vehicle later appears on a different FleetEdge account, a `FLEETEDGE_ACCOUNT_MISMATCH` audit entry is written and the vehicle's primary tag is not overwritten — historical attribution is preserved.
+- Existing extension-ingested rows (`FleetEdgeSnapshot`, `FleetEdgePush`) remain `fleetEdgeAccountId: null` until the next ingestion event triggers a lazy backfill.
+
+#### New env var required on the backend server
+
+`FLEETEDGE_CRED_KEY` (32-byte base64) must be set before the backend starts. The server will exit at boot with a clear error message if it is missing. This key encrypts PULL account credentials at rest and is unrelated to the extension flow, but it is required for the backend to start regardless of which ingestion paths are active.
+
+Generate: `node -e "console.log(require('crypto').randomBytes(32).toString('base64'))"`
+
+Set it in `backend/main-backend/.env`:
+
+```env
+FLEETEDGE_CRED_KEY=<generated value>
+```
+
+#### No extension build or manifest changes required
+
+The extension zip (`gnbedge-v0.0.0.1.zip`) does not need to be rebuilt. All changes are server-side.
+
+---
+
 ## [2026-05-03] — branch: updated-design
 
 ### CWS Compliance Pass (v0.0.0.1)
