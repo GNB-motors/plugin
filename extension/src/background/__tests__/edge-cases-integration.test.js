@@ -214,7 +214,8 @@ describe('fleetedgeLink - edge cases', () => {
       },
       tabs: {
         query: vi.fn(() => Promise.resolve([{ id: 42 }])),
-        sendMessage: vi.fn(() => Promise.reject(new Error('Could not establish connection'))),
+        sendMessage: vi.fn(() => Promise.reject(new Error('Could not establish connection. Receiving end does not exist.'))),
+        reload: vi.fn(() => Promise.resolve()),
       },
       permissions: { contains: vi.fn(() => Promise.resolve(true)) },
       action: { setBadgeText: vi.fn(), setBadgeBackgroundColor: vi.fn() },

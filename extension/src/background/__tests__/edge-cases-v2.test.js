@@ -193,7 +193,7 @@ describe('fleetedgeLink — v2 improvements', () => {
             remove: vi.fn(() => Promise.resolve()),
           },
         },
-        tabs: { query: vi.fn(() => Promise.resolve([])), sendMessage: vi.fn() },
+        tabs: { query: vi.fn(() => Promise.resolve([])), sendMessage: vi.fn(), reload: vi.fn(() => Promise.resolve()) },
         permissions: { contains: vi.fn(() => Promise.resolve(true)) },
         action: { setBadgeText: vi.fn(), setBadgeBackgroundColor: vi.fn() },
       },
