@@ -1,3 +1,16 @@
 node_modules/
 .env
 *.log
+
+# Build / packaging artifacts (extension)
+extension/dist/
+extension/gnbedge-v*
+extension/gnbedge-*.zip
+
+# Local archives & scratch screenshots
+*.rar
+Screenshot*.png
+
+# Embedded privacy-policy site — it is its own git repo; host it separately
+# (GitHub Pages) or convert it to a proper submodule, don't nest it here.
+extension/gnbedge-privacy-site/
