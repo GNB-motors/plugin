@@ -1,14 +1,11 @@
 /**
- * FleetEdge Link — Background Module
- * ────────────────────────────────────
+ * FleetEdge Link — Background Module (multi-account)
+ * ────────────────────────────────────────────────────
  * Coordinates:
  *   1. Sends READ_FLEETEDGE_TOKEN to the content script on fleetedge.home.tatamotors
  *   2. Forwards the token to the backend (POST /fleetedge/link-token)
- *   3. Refreshes connection status from the backend
- *
- * This replaces tokenCapture.js (which used webRequest — CWS violation).
- *
- * LEMU Telemetry: TOKEN layer (content script token read), FLEETEDGE layer (link/status).
+ *   3. Refreshes multi-account status from the backend
+ *   4. Manages badge + expiry notifications per account
  */
 
 import { createLogger } from './logger.js';
@@ -19,47 +16,84 @@ const logger = createLogger('FleetEdgeLink');
 const tokenTel = createLayerLogger(LAYERS.TOKEN);
 const feTel = createLayerLogger(LAYERS.FLEETEDGE);
 
-/** Minimum remaining seconds a token must have before we send it to backend. */
 const MIN_TOKEN_TTL_SECONDS = 600; // 10 minutes
 
-/**
- * Attempt to read the FleetEdge token from an open FleetEdge tab
- * by messaging the content script, then send it to the backend.
- *
- * @returns {{ success: boolean, vehicleCount?: number, error?: string }}
- */
-export async function connectFleetEdge() {
-  logger.info('Connecting to FleetEdge...');
-  feTel.perfStart('connect');
+// Track which accounts have already triggered a notification this session
+const _notifiedExpiredAccounts = new Set();
 
-  // 1. Verify optional host permission is granted before querying tabs.
+// ── helpers ───────────────────────────────────────────────────────────────────
+
+function deriveAccountStatus(account, nowMs = Date.now()) {
+  if (account.status === 'NEEDS_REAUTH') return 'expired';
+  const exp = account.expiresAt ? new Date(account.expiresAt).getTime() : null;
+  if (exp == null) return 'linked';
+  const rem = (exp - nowMs) / 1000;
+  if (rem <= 0) return 'expired';
+  if (rem <= 3600) return 'expiring';
+  return 'linked';
+}
+
+function updateBadge(accounts) {
+  if (!accounts.length) {
+    chrome.action.setBadgeText({ text: '' });
+    return;
+  }
+  const now = Date.now();
+  let expired = 0, expiring = 0;
+  for (const a of accounts) {
+    const s = deriveAccountStatus(a, now);
+    if (s === 'expired') expired++;
+    else if (s === 'expiring') expiring++;
+  }
+  if (expired > 0) {
+    chrome.action.setBadgeText({ text: String(expired) });
+    chrome.action.setBadgeBackgroundColor({ color: '#ef4444' });
+  } else if (expiring > 0) {
+    chrome.action.setBadgeText({ text: '!' });
+    chrome.action.setBadgeBackgroundColor({ color: '#f59e0b' });
+  } else {
+    chrome.action.setBadgeText({ text: '✓' });
+    chrome.action.setBadgeBackgroundColor({ color: '#22c55e' });
+  }
+}
+
+function notifyExpiredAccounts(accounts) {
+  const now = Date.now();
+  for (const acc of accounts) {
+    const s = deriveAccountStatus(acc, now);
+    if (s === 'expired' && !_notifiedExpiredAccounts.has(acc.accountId)) {
+      _notifiedExpiredAccounts.add(acc.accountId);
+      chrome.notifications.create(`fe-expired-${acc.accountId}`, {
+        type: 'basic',
+        iconUrl: 'logo.svg',
+        title: 'FleetEdge session expired',
+        message: `Session for "${acc.friendlyName || acc.fleetId}" expired — open FleetEdge and reconnect.`,
+      });
+      feTel.warn('FleetEdge token expired — notification fired', { accountId: acc.accountId });
+    } else if (s !== 'expired' && _notifiedExpiredAccounts.has(acc.accountId)) {
+      _notifiedExpiredAccounts.delete(acc.accountId);
+    }
+  }
+}
+
+async function captureTabToken() {
   const hasPermission = await chrome.permissions.contains({
     origins: ['https://fleetedge.home.tatamotors/*'],
   });
   if (!hasPermission) {
-    const error = 'Fleet portal access not yet allowed — click Connect to grant permission first';
-    logger.warn(error);
-    feTel.perfEnd('connect');
-    return { success: false, error };
+    return { success: false, error: 'Fleet portal access not yet allowed — click Connect to grant permission first' };
   }
 
-  // 2. Find an open FleetEdge tab
   const tabs = await chrome.tabs.query({ url: 'https://fleetedge.home.tatamotors/*' });
   if (!tabs.length) {
-    const error = 'No FleetEdge tab open — please open FleetEdge and log in first';
-    logger.warn(error);
     tokenTel.warn('No FleetEdge tab found');
-    feTel.perfEnd('connect');
-    return { success: false, error };
+    return { success: false, error: 'No FleetEdge tab open — please open FleetEdge and log in first' };
   }
 
-  // Pick the most recently accessed tab (handles multiple FleetEdge tabs)
   const tab = tabs.length > 1
     ? tabs.sort((a, b) => (b.lastAccessed || 0) - (a.lastAccessed || 0))[0]
     : tabs[0];
-  logger.info(`Found FleetEdge tab: ${tab.id}${tabs.length > 1 ? ` (picked from ${tabs.length} tabs)` : ''}`);
 
-  // 2. Ask the content script to read the token; auto-refresh tab once if not injected yet
   let tokenResult;
   try {
     tokenResult = await chrome.tabs.sendMessage(tab.id, { type: 'READ_FLEETEDGE_TOKEN' });
@@ -68,34 +102,22 @@ export async function connectFleetEdge() {
                          err.message?.includes('Receiving end does not exist');
     if (isNoReceiver) {
       logger.info('Content script not ready — reloading FleetEdge tab and retrying...');
-      tokenTel.info('Reloading tab for content script injection', { tabId: tab.id });
       chrome.tabs.reload(tab.id);
-      // Wait for the page to load and content script to inject (~3s)
       await new Promise((resolve) => setTimeout(resolve, 3000));
       try {
         tokenResult = await chrome.tabs.sendMessage(tab.id, { type: 'READ_FLEETEDGE_TOKEN' });
       } catch (retryErr) {
-        const error = 'Could not communicate with FleetEdge page after refresh — please try again';
-        logger.error(error, retryErr.message);
         tokenTel.error('Content script communication failed after retry', { tabId: tab.id, reason: retryErr.message });
-        feTel.perfEnd('connect');
-        return { success: false, error };
+        return { success: false, error: 'Could not communicate with FleetEdge page after refresh — please try again' };
       }
     } else {
-      const error = 'Could not communicate with FleetEdge page — try refreshing the FleetEdge tab';
-      logger.error(error, err.message);
       tokenTel.error('Content script communication failed', { tabId: tab.id, reason: err.message });
-      feTel.perfEnd('connect');
-      return { success: false, error };
+      return { success: false, error: 'Could not communicate with FleetEdge page — try refreshing the FleetEdge tab' };
     }
   }
 
   if (!tokenResult || !tokenResult.success) {
-    const error = tokenResult?.error || 'Could not read FleetEdge token — please log in to FleetEdge first';
-    logger.warn(error);
-    tokenTel.warn('Token read failed', { error });
-    feTel.perfEnd('connect');
-    return { success: false, error };
+    return { success: false, error: tokenResult?.error || 'Could not read FleetEdge token — please log in to FleetEdge first' };
   }
 
   tokenTel.info('Token read from content script', {
@@ -103,63 +125,59 @@ export async function connectFleetEdge() {
     fleetId: tokenResult.fleetId,
     hasExp: !!tokenResult.exp,
   });
-  logger.info(`Token read from FleetEdge (found in: ${tokenResult.foundIn}), fleet: ${tokenResult.fleetId}`);
 
-  // 2b. Validate token isn't about to expire (avoid wasting backend work)
   if (tokenResult.exp) {
     const { valid, remainingSeconds } = checkTokenExpiry({ exp: tokenResult.exp }, MIN_TOKEN_TTL_SECONDS);
     if (!valid) {
       const minutes = Math.max(0, Math.floor(remainingSeconds / 60));
-      const error = `FleetEdge token expires in ${minutes} min — please refresh FleetEdge and try again`;
-      logger.warn(error);
       tokenTel.warn('Token too close to expiry', { remainingSeconds, fleetId: tokenResult.fleetId });
-      feTel.perfEnd('connect');
-      return { success: false, error };
+      return { success: false, error: `FleetEdge token expires in ${minutes} min — please refresh FleetEdge and try again` };
     }
   }
 
-  // 3. Send to backend
+  return { success: true, ...tokenResult };
+}
+
+// ── public API ────────────────────────────────────────────────────────────────
+
+/**
+ * Connect a new FleetEdge account (captures token from open tab, links to backend).
+ */
+export async function connectFleetEdge() {
+  logger.info('Connecting to FleetEdge...');
+  feTel.perfStart('connect');
+
+  const captured = await captureTabToken();
+  if (!captured.success) {
+    feTel.perfEnd('connect');
+    return captured;
+  }
+
   const { backendFetch } = await import('./backendApi.js');
   try {
     const response = await backendFetch('/fleetedge/link-token', {
       method: 'POST',
-      body: JSON.stringify({
-        token: tokenResult.token,
-        fleetId: tokenResult.fleetId,
-      }),
+      body: JSON.stringify({ token: captured.token, fleetId: captured.fleetId }),
     });
-
     const data = await response.json();
     const result = data.data;
 
-    // Store connection status locally for quick access
-    await setStorage({
-      fleetEdgeStatus: 'linked',
-      fleetEdgeFleetId: tokenResult.fleetId,
-      fleetEdgeExp: tokenResult.exp,
-      fleetEdgeLinkedAt: Date.now(),
-      fleetEdgeVehicleCount: result.vehicleCount || 0,
-    });
+    // Refresh full accounts list
+    const status = await getFleetEdgeStatus();
 
-    // Update badge
-    chrome.action.setBadgeText({ text: '✓' });
-    chrome.action.setBadgeBackgroundColor({ color: '#22c55e' });
-
-    logger.info(`FleetEdge linked: ${result.vehicleCount} vehicles, expires ${new Date(tokenResult.exp * 1000).toISOString()}`);
-    feTel.info('FleetEdge linked', {
-      vehicleCount: result.vehicleCount,
-      fleetId: tokenResult.fleetId,
-      expiresAt: result.expiresAt,
-    });
+    logger.info(`FleetEdge linked: ${result.vehicleCount} vehicles`);
+    feTel.info('FleetEdge linked', { accountId: result.accountId, vehicleCount: result.vehicleCount });
     feTel.perfEnd('connect');
 
     return {
       success: true,
+      accountId: result.accountId,
       vehicleCount: result.vehicleCount,
       expiresAt: result.expiresAt,
+      accounts: status.accounts || [],
     };
   } catch (err) {
-    logger.error('Failed to send token to backend:', err.message);
+    logger.error('Failed to link token:', err.message);
     feTel.error('Link token to backend failed', { error: err.message });
     feTel.perfEnd('connect');
     return { success: false, error: err.message };
@@ -167,68 +185,89 @@ export async function connectFleetEdge() {
 }
 
 /**
- * Fetch FleetEdge connection status from the backend.
+ * Reconnect a specific account (same capture flow, backend upserts by userId+accountId).
+ */
+export async function reconnectFleetEdgeAccount(accountId) {
+  logger.info(`Reconnecting account ${accountId}`);
+  return connectFleetEdge();
+}
+
+/**
+ * Disconnect a specific account. Null disconnects all.
+ */
+export async function disconnectFleetEdgeAccount(accountId) {
+  const { backendFetch } = await import('./backendApi.js');
+  try {
+    await backendFetch('/fleetedge/unlink', {
+      method: 'POST',
+      body: accountId ? JSON.stringify({ accountId }) : undefined,
+    });
+  } catch (err) {
+    logger.warn('Unlink API call failed:', err.message);
+    feTel.warn('Unlink API call failed', { error: err.message });
+  }
+
+  if (accountId) {
+    const store = await getStorage(['fleetEdgeAccounts']);
+    const accounts = (store.fleetEdgeAccounts || []).filter((a) => a.accountId !== accountId);
+    await setStorage({ fleetEdgeAccounts: accounts });
+    updateBadge(accounts);
+    _notifiedExpiredAccounts.delete(accountId);
+  } else {
+    await setStorage({ fleetEdgeAccounts: [], fleetEdgePull: null });
+    chrome.action.setBadgeText({ text: '' });
+    _notifiedExpiredAccounts.clear();
+  }
+
+  feTel.info('FleetEdge disconnected', { accountId });
+  return { success: true };
+}
+
+/**
+ * Disconnect all accounts (used by clearData / CLEAR_ALL).
+ */
+export async function disconnectFleetEdge() {
+  return disconnectFleetEdgeAccount(null);
+}
+
+/**
+ * Rename an account in local storage (optimistic).
+ */
+export async function renameFleetEdgeAccount(accountId, friendlyName) {
+  const store = await getStorage(['fleetEdgeAccounts']);
+  const accounts = (store.fleetEdgeAccounts || []).map((a) =>
+    a.accountId === accountId ? { ...a, friendlyName } : a
+  );
+  await setStorage({ fleetEdgeAccounts: accounts });
+  feTel.info('Account renamed', { accountId });
+  return { success: true };
+}
+
+/**
+ * Fetch FleetEdge connection status from backend.
+ * Returns { accounts: [...], pull: {...} }
  */
 export async function getFleetEdgeStatus() {
   try {
     const { backendFetch } = await import('./backendApi.js');
     const response = await backendFetch('/fleetedge/status');
     const data = await response.json();
-    const status = data.data;
+    const status = data.data || {};
+    const accounts = status.accounts || [];
+    const pull = status.pull || {};
 
-    // Cache locally
-    await setStorage({
-      fleetEdgeStatus: status.status,
-      fleetEdgeFleetId: status.fleetId || null,
-    });
+    await setStorage({ fleetEdgeAccounts: accounts, fleetEdgePull: pull });
+    updateBadge(accounts);
+    notifyExpiredAccounts(accounts);
 
-    // Update badge based on status
-    if (status.status === 'linked') {
-      chrome.action.setBadgeText({ text: '✓' });
-      chrome.action.setBadgeBackgroundColor({ color: '#22c55e' });
-    } else if (status.status === 'expired') {
-      chrome.action.setBadgeText({ text: '!' });
-      chrome.action.setBadgeBackgroundColor({ color: '#ef4444' });
-      feTel.warn('FleetEdge token expired', { fleetId: status.fleetId });
-    }
-
-    feTel.debug('Status check OK', { status: status.status });
-    return status;
+    feTel.debug('FleetEdge status fetched', { accountCount: accounts.length });
+    return { accounts, pull };
   } catch (err) {
     feTel.warn('Status check failed, using cache', { error: err.message });
-    // If backend unreachable, return cached status
-    const store = await getStorage(['fleetEdgeStatus', 'fleetEdgeFleetId']);
+    const store = await getStorage(['fleetEdgeAccounts', 'fleetEdgePull']);
     return {
-      status: store.fleetEdgeStatus || 'unknown',
-      fleetId: store.fleetEdgeFleetId || null,
-      error: err.message,
+      accounts: store.fleetEdgeAccounts || [],
+      pull: store.fleetEdgePull || {},
     };
   }
-}
-
-/**
- * Disconnect FleetEdge (tell backend to delete stored token).
- */
-export async function disconnectFleetEdge() {
-  try {
-    const { backendFetch } = await import('./backendApi.js');
-    await backendFetch('/fleetedge/unlink', { method: 'POST' });
-  } catch (err) {
-    logger.warn('Unlink API call failed:', err.message);
-    feTel.warn('Unlink API call failed', { error: err.message });
-  }
-
-  // Clear local state regardless
-  await setStorage({
-    fleetEdgeStatus: 'unlinked',
-    fleetEdgeFleetId: null,
-    fleetEdgeExp: null,
-    fleetEdgeLinkedAt: null,
-    fleetEdgeVehicleCount: null,
-  });
-
-  chrome.action.setBadgeText({ text: '' });
-  logger.info('FleetEdge disconnected');
-  feTel.info('FleetEdge disconnected');
-  return { success: true };
 }

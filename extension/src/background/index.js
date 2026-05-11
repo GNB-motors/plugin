@@ -11,8 +11,15 @@
  *          direct FleetEdge API calls, VIN map caching, Manual Query.
  */
 
-import { connectFleetEdge, getFleetEdgeStatus, disconnectFleetEdge } from './fleetedgeLink.js';
-import { getStorage, setStorage, removeStorage, getMetrics } from './utils.js';
+import {
+  connectFleetEdge,
+  getFleetEdgeStatus,
+  disconnectFleetEdge,
+  disconnectFleetEdgeAccount,
+  reconnectFleetEdgeAccount,
+  renameFleetEdgeAccount,
+} from './fleetedgeLink.js';
+import { getStorage, setStorage, removeStorage } from './utils.js';
 import { getLogs, clearLogs, createLogger } from './logger.js';
 import { login, logout, isAuthenticated, backendFetch, fetchStatus } from './backendApi.js';
 import { startTelemetry, record, LAYERS, createLayerLogger, getEvents, clearEvents, getStats, getHealthSnapshot, getBreadcrumbs } from './telemetry.js';
@@ -133,19 +140,16 @@ async function handleMessage(message) {
     case 'GET_STATUS': {
       const store = await getStorage([
         'authToken', 'authUser', 'backendUrl',
-        'fleetEdgeStatus', 'fleetEdgeFleetId', 'fleetEdgeExp',
-        'fleetEdgeVehicleCount', 'fleetEdgeLinkedAt',
+        'fleetEdgeAccounts', 'fleetEdgePull',
       ]);
 
       const cachedFe = {
-        status: store.fleetEdgeStatus || 'unknown',
-        fleetId: store.fleetEdgeFleetId || null,
-        remainingSeconds: 0,
+        accounts: store.fleetEdgeAccounts || [],
+        pull: store.fleetEdgePull || {},
       };
 
-      // Parallel fetch: metrics + (backend status + FleetEdge status) if authenticated
-      const [metrics, backendStatus, feStatus] = await Promise.all([
-        getMetrics(),
+      // Parallel fetch: backend status + FleetEdge status if authenticated
+      const [backendStatus, feStatus] = await Promise.all([
         store.authToken
           ? fetchStatus().then(r => r.data).catch(() => null)
           : Promise.resolve(null),
@@ -159,14 +163,21 @@ async function handleMessage(message) {
         user: store.authUser || null,
         backendUrl: store.backendUrl || null,
         fleetEdge: {
-          status: feStatus.status,
-          fleetId: feStatus.fleetId || store.fleetEdgeFleetId || null,
-          remainingSeconds: feStatus.remainingSeconds || 0,
-          vehicleCount: feStatus.vehicleCount || store.fleetEdgeVehicleCount || 0,
-          linkedAt: store.fleetEdgeLinkedAt || null,
+          accounts: feStatus.accounts || [],
+          pull: {
+            lastRunAt: feStatus.pull?.lastRunAt || backendStatus?.pullStatus?.lastRunAt || null,
+            nextRunAt: feStatus.pull?.nextRunAt || backendStatus?.pullStatus?.nextRunAt || null,
+            pullingNow: (backendStatus?.inProgress ?? 0) > 0,
+          },
+        },
+        metrics: {
+          pending:    backendStatus?.pending    ?? 0,
+          inProgress: backendStatus?.inProgress ?? 0,
+          completed:  backendStatus?.completed  ?? 0,
+          flagged:    backendStatus?.flagged    ?? 0,
+          noData:     backendStatus?.noData     ?? 0,
         },
         backendStatus,
-        metrics,
       };
     }
 
@@ -190,10 +201,34 @@ async function handleMessage(message) {
     }
 
     case 'DISCONNECT_FLEETEDGE': {
-      tlog.info('FleetEdge disconnect requested');
+      tlog.info('FleetEdge disconnect all requested');
       const result = await disconnectFleetEdge();
       invalidateStatusCache();
       return result;
+    }
+
+    case 'RECONNECT_ACCOUNT': {
+      const { accountId } = message;
+      if (!accountId) throw new Error('accountId is required');
+      tlog.info('FleetEdge account reconnect requested', { accountId });
+      invalidateStatusCache();
+      const result = await reconnectFleetEdgeAccount(accountId);
+      return result;
+    }
+
+    case 'DISCONNECT_ACCOUNT': {
+      const { accountId } = message;
+      if (!accountId) throw new Error('accountId is required');
+      tlog.info('FleetEdge account disconnect requested', { accountId });
+      const result = await disconnectFleetEdgeAccount(accountId);
+      invalidateStatusCache();
+      return result;
+    }
+
+    case 'RENAME_ACCOUNT': {
+      const { accountId, friendlyName } = message;
+      if (!accountId || !friendlyName) throw new Error('accountId and friendlyName are required');
+      return renameFleetEdgeAccount(accountId, friendlyName);
     }
 
     case 'GET_FLEETEDGE_STATUS': {
@@ -243,8 +278,7 @@ async function handleMessage(message) {
 
       await removeStorage([
         'authToken', 'authUser', 'backendUrl',
-        'fleetEdgeStatus', 'fleetEdgeFleetId', 'fleetEdgeExp',
-        'fleetEdgeLinkedAt', 'fleetEdgeVehicleCount',
+        'fleetEdgeAccounts', 'fleetEdgePull',
         'metrics',
       ]);
       chrome.action.setBadgeText({ text: '' });

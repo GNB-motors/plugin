@@ -196,6 +196,7 @@ describe('fleetedgeLink — v2 improvements', () => {
         tabs: { query: vi.fn(() => Promise.resolve([])), sendMessage: vi.fn(), reload: vi.fn(() => Promise.resolve()) },
         permissions: { contains: vi.fn(() => Promise.resolve(true)) },
         action: { setBadgeText: vi.fn(), setBadgeBackgroundColor: vi.fn() },
+        notifications: { create: vi.fn() },
       },
     };
   }
@@ -442,15 +443,17 @@ describe('fleetedgeLink — v2 improvements', () => {
 
     vi.doMock('../backendApi.js', () => ({
       backendFetch: vi.fn(() => Promise.resolve({
-        json: () => Promise.resolve({ data: { status: 'linked', fleetId: 'F1' } }),
+        json: () => Promise.resolve({
+          data: { accounts: [{ accountId: 'a1', status: 'ACTIVE', fleetId: 'F1', expiresAt: new Date(Date.now() + 3600_000).toISOString() }], pull: {} },
+        }),
       })),
     }));
 
     const mod = await import('../fleetedgeLink.js');
     const status = await mod.getFleetEdgeStatus();
-    expect(status.status).toBe('linked');
+    expect(status.accounts[0].fleetId).toBe('F1');
 
-    const debugEvt = telemetryCalls.find(e => e.layer === 'FLEETEDGE' && e.msg === 'Status check OK');
+    const debugEvt = telemetryCalls.find(e => e.layer === 'FLEETEDGE' && e.msg === 'FleetEdge status fetched');
     expect(debugEvt).toBeDefined();
   });
 
@@ -482,17 +485,23 @@ describe('fleetedgeLink — v2 improvements', () => {
 
     vi.doMock('../backendApi.js', () => ({
       backendFetch: vi.fn(() => Promise.resolve({
-        json: () => Promise.resolve({ data: { status: 'expired', fleetId: 'F1' } }),
+        json: () => Promise.resolve({
+          data: {
+            accounts: [{ accountId: 'a1', status: 'NEEDS_REAUTH', fleetId: 'F1', expiresAt: new Date(Date.now() - 3600_000).toISOString() }],
+            pull: {},
+          },
+        }),
       })),
     }));
 
     const mod = await import('../fleetedgeLink.js');
     const status = await mod.getFleetEdgeStatus();
-    expect(status.status).toBe('expired');
+    expect(status.accounts[0].status).toBe('NEEDS_REAUTH');
 
-    const warnEvt = telemetryCalls.find(e => e.layer === 'FLEETEDGE' && e.msg.includes('expired'));
-    expect(warnEvt).toBeDefined();
-    expect(chromeMock.action.setBadgeText).toHaveBeenCalledWith({ text: '!' });
+    const debugEvt = telemetryCalls.find(e => e.layer === 'FLEETEDGE' && e.msg === 'FleetEdge status fetched');
+    expect(debugEvt).toBeDefined();
+    // badge should show expired count (1 expired account)
+    expect(chromeMock.action.setBadgeText).toHaveBeenCalledWith({ text: '1' });
   });
 
   it('getFleetEdgeStatus falls back to cache when backend fails', async () => {
@@ -500,8 +509,8 @@ describe('fleetedgeLink — v2 improvements', () => {
     vi.resetModules();
 
     const { store, chromeMock } = makeStore();
-    store.fleetEdgeStatus = 'linked';
-    store.fleetEdgeFleetId = 'cached-fleet';
+    store.fleetEdgeAccounts = [{ accountId: 'a1', status: 'ACTIVE', fleetId: 'cached-fleet', expiresAt: new Date(Date.now() + 3600_000).toISOString() }];
+    store.fleetEdgePull = {};
     vi.stubGlobal('chrome', chromeMock);
 
     vi.doMock('../logger.js', () => ({
@@ -530,9 +539,8 @@ describe('fleetedgeLink — v2 improvements', () => {
     const mod = await import('../fleetedgeLink.js');
     const status = await mod.getFleetEdgeStatus();
 
-    expect(status.status).toBe('linked');
-    expect(status.fleetId).toBe('cached-fleet');
-    expect(status.error).toBe('Network down');
+    expect(status.accounts[0].fleetId).toBe('cached-fleet');
+    expect(status.accounts[0].status).toBe('ACTIVE');
 
     const warnEvt = telemetryCalls.find(e => e.msg.includes('Status check failed'));
     expect(warnEvt).toBeDefined();
@@ -603,7 +611,7 @@ describe('index.js — v2 improvements (handleMessage logic)', () => {
     const {
       store = {},
       loginResult = { token: 'jwt', user: { name: 'T', role: 'OWNER' } },
-      feStatusResult = { status: 'linked', fleetId: 'F1', remainingSeconds: 3600 },
+      feStatusResult = { accounts: [{ accountId: 'a1', status: 'ACTIVE', fleetId: 'F1', expiresAt: new Date(Date.now() + 3600_000).toISOString() }], pull: { lastRunAt: null, nextRunAt: null } },
       fetchStatusResult = { data: { pending: 5, completed: 10 } },
       connectResult = { success: true, vehicleCount: 15 },
       disconnectResult = { success: true },
@@ -778,7 +786,7 @@ describe('index.js — v2 improvements (handleMessage logic)', () => {
     const result = await sendMessage({ type: 'GET_STATUS' });
 
     expect(result.authenticated).toBe(true);
-    expect(result.fleetEdge.status).toBe('linked');
+    expect(result.fleetEdge.accounts[0].fleetId).toBe('F1');
     expect(result.backendStatus).toBeDefined();
     expect(result.metrics).toBeDefined();
 
@@ -794,8 +802,8 @@ describe('index.js — v2 improvements (handleMessage logic)', () => {
     // Now seed the store and make the FE status spy reject lazily
     Object.assign(STORE, {
       authToken: 'jwt-123',
-      fleetEdgeStatus: 'linked',
-      fleetEdgeFleetId: 'cached-fleet',
+      fleetEdgeAccounts: [{ accountId: 'a1', status: 'ACTIVE', fleetId: 'cached-fleet', expiresAt: new Date(Date.now() + 3600_000).toISOString() }],
+      fleetEdgePull: {},
     });
     spies.getFleetEdgeStatus.mockImplementation(() => Promise.reject(new Error('Network down')));
 
@@ -803,8 +811,7 @@ describe('index.js — v2 improvements (handleMessage logic)', () => {
     const result = await sendMessage({ type: 'GET_STATUS' });
 
     expect(result.authenticated).toBe(true);
-    expect(result.fleetEdge.status).toBe('linked');
-    expect(result.fleetEdge.fleetId).toBe('cached-fleet');
+    expect(result.fleetEdge.accounts[0].fleetId).toBe('cached-fleet');
   });
 
   it('GET_STATUS for unauthenticated user skips network calls', async () => {
