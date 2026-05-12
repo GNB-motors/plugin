@@ -5,10 +5,20 @@
 }
 
 body {
-  font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
+  font-family: 'Inter', -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
   font-size: 13px;
   line-height: 1.5;
-  color: #1a1a1a;
-  background: #fff;
+  color: #0f172a;
+  margin: 0;
+  /* Premium animated gradient background */
+  background: linear-gradient(-45deg, #e2e8f0, #ffffff, #f8fafc, #cbd5e1);
+  background-size: 400% 400%;
+  animation: gradientBG 15s ease infinite;
   -webkit-font-smoothing: antialiased;
+}
+
+@keyframes gradientBG {
+  0% { background-position: 0% 50%; }
+  50% { background-position: 100% 50%; }
+  100% { background-position: 0% 50%; }
 }

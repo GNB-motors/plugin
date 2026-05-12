@@ -1,449 +1,326 @@
-# FleetEdge Fuel Monitor — Chrome Extension 🚗⛽️
+# FleetEdge Fuel Monitor — Chrome Extension v2.0.0
 
-A Chrome Extension (Manifest V3) that **passively captures FleetEdge authentication tokens** from the user's browser session and uses them to fetch fuel-consumption data on behalf of your backend.
-It replaces browser automation scrapers — **no Playwright**, **no headless logins** — the extension does the API calls from the logged-in user’s browser and **only** sends aggregated results to your server.
-**API Calls via Tab Injection:** To bypass Chrome's service-worker Origin restrictions, the extension injects `fetch()` calls directly into the open FleetEdge browser tab using `chrome.scripting.executeScript`. This ensures requests carry the correct `Origin` and `Referer` headers plus full session cookies — appearing as legitimate FleetEdge portal requests.
----
+A CWS-compliant Chrome Extension (Manifest V3) that connects to the FleetEdge portal to share authentication tokens with your backend. The backend handles all FleetEdge API calls server-side — the extension acts as a thin status display and token provider.
 
-## Key ideas 🧠
-
-* The FleetEdge token **never leaves the browser**.
-* The extension polls your backend for tasks, queries FleetEdge with the captured token, and POSTs results back to your backend.
-* Works as a **privacy-preserving** in-browser scraper that runs only when the user has an active session.
+**Backend Direct Architecture (v2.0.0):** All FleetEdge API calls are made by the backend's `FleetEdgeProxyService`. The extension only reads the FleetEdge JWT from localStorage via a declared content script and sends it to the backend. No `webRequest`, `scripting`, or `tabs` permissions required.
 
 ---
 
-# How it works (visual) 🔁
+## How It Works
 
-```mermaid
-flowchart LR
-  subgraph Browser
-    A[FleetEdge Website]
-    B[Extension\nService Worker]
-  end
-
-  C[Backend Server]
-
-  A -->|Bearer Token| B
-  B -->|GET /tasks/pending| C
-  C -->|tasks| B
-  B -->|FleetEdge API| A
-  B -->|POST results| C
-```
-
-Sequence view:
+### High-Level Flow
 
 ```mermaid
 sequenceDiagram
-  participant UserBrowser as Browser (FleetEdge)
-  participant Extension as Extension (service worker)
-  participant Backend as Your Backend
+    participant U as User
+    participant FE as FleetEdge Tab
+    participant CS as Content Script
+    participant EXT as Extension (SW)
+    participant BE as Backend Server
 
-  UserBrowser->>Extension: Extension captures Bearer token from FleetEdge request
-  loop every 5 min (configurable)
-    Extension->>Backend: GET /tasks/pending (system token)
-    Backend-->>Extension: tasks[]
-    Extension->>FleetEdge: /get-vehicles -> build reg->VIN map
-    Extension->>FleetEdge: /analyse-fuel-consumption (VIN + UTC range)
-    FleetEdge-->>Extension: fuel data
-    Extension->>Backend: POST /tasks/:taskId/result
-  end
+    U->>FE: Logs into FleetEdge normally
+    U->>EXT: Signs in to backend (popup)
+    EXT->>BE: POST /api/extension/auth/login
+    BE-->>EXT: JWT token + user info
+
+    U->>EXT: Clicks "Connect FleetEdge"
+    EXT->>CS: READ_FLEETEDGE_TOKEN message
+    CS->>FE: Reads JWT from localStorage
+    CS-->>EXT: { token, fleetId, exp }
+    EXT->>BE: POST /api/extension/fleetedge/link-token
+    BE-->>EXT: Token linked ✓
+
+    loop Every 5 minutes (backend cron)
+        BE->>BE: FleetEdgeCronService runs
+        BE->>BE: Find pending tasks for org
+        BE->>BE: Call FleetEdge CVP API server-side
+        BE->>BE: Process results + flag discrepancies
+    end
+
+    loop Every 2 minutes (extension polling)
+        EXT->>BE: GET /api/extension/fleetedge/status
+        BE-->>EXT: { status, tokenExp, taskCounts }
+        EXT->>EXT: Update popup badge
+    end
 ```
 
+```mermaid
+graph LR
+    A[FleetEdge Tab] -->|Content script reads JWT| B[Extension Service Worker]
+    B -->|Link token| C[Backend API]
+    C -->|Store token| D[FleetEdgeProxyService]
+    D -->|Server-side API calls| E[FleetEdge CVP API]
+    D -->|Process tasks| F[FuelComparisonService]
+    F -->|Flag discrepancies| G[Frontend Dashboard]
+```
+
+**Key points:**
+- The FleetEdge token is read by a **declared content script** (CWS-compliant)
+- The token is sent to your backend for server-side use
+- **All FleetEdge API calls happen on the backend** — not in the browser
+- The extension has minimal permissions: `storage`, `alarms`, `notifications`
+- The FleetEdge tab does NOT need to stay open after token linking
+
+### Step-by-Step Detail
+
+1. **Token Reading** — We leverage Manifest V3's official `world: "MAIN"` execution environment. A stealth script (`networkSpy.js`) runs natively in the FleetEdge page context to intercept `window.fetch` and `XMLHttpRequest`. When the Single Page Application makes a request, the spy grabs the live `Authorization` header mid-flight and securely passes it to our isolated extension script (`fleetedgeTokenReader.js`) via `window.postMessage`. This completely bypasses any localStorage obfuscation while maintaining 100% CWS compliance (no string evaluation).
+
+2. **Token Linking** — The service worker sends the discovered token to `POST /api/extension/fleetedge/link-token`. The backend validates the token against the FleetEdge CVP API before storing it. If validation fails, the token is rejected.
+
+3. **Backend Task Processing** — A cron job (`FleetEdgeCronService`) runs every 5 minutes. For each organization with a linked FleetEdge token, it:
+   - Finds all pending fuel comparison tasks
+   - Fetches the vehicle VIN map from FleetEdge
+   - Calls FleetEdge's `/analyse-fuel-consumption` API for each task
+   - Processes results through `FuelComparisonService`
+   - Marks tasks as completed or failed
+
+4. **Status Polling** — The extension polls `GET /api/extension/fleetedge/status` every 2 minutes via `chrome.alarms` to display connection status and task counts in the popup.
+
+5. **Manual Trigger** — Users can click "Process Tasks Now" in the popup to trigger `POST /api/extension/fleetedge/process-tasks` immediately — useful for testing or urgent processing.
+
+6. **Token Expiry** — FleetEdge tokens expire after ~24 hours. The backend checks expiry before each use and returns `expired` status. The extension prompts the user to reconnect.
+
 ---
 
-# Table of contents 📚
-
-* [Installation](#installation-)
-* [API Architecture (Tab Injection)](#api-architecture-tab-injection-)
-* [First-time setup](#first-time-setup-)
-* [Backend integration (required endpoints)](#backend-integration-required-endpoints-)
-* [CORS configuration](#cors-configuration-)
-* [Database suggestions](#suggested-database-schema-mongodb-)
-* [Environment variables](#environment-variables-)
-* [Development](#development-)
-* [Testing & Quality Gates](#testing--quality-gates-)
-* [Troubleshooting](#troubleshooting-)
-* [Security & privacy](#security--privacy-)
-* [Contributing & license](#contributing--license-)
-
----
-
-# Installation 🛠️
+## Installation
 
 ```bash
 cd extension
 npm install
-cp .env.example .env
-# Edit .env (VITE_BACKEND_BASE_URL etc)
+```
+
+Build:
+
+```bash
 npm run build
 ```
 
-Load in Chrome:
+Load into Chrome:
 
 1. Go to `chrome://extensions/`
-2. Enable **Developer mode**
+2. Enable **Developer mode** (top-right toggle)
 3. Click **Load unpacked** → select the `dist/` folder
 
-For dev (hot reload popup):
+### First-Time Setup
 
-```bash
-cd extension
-npm run dev
-```
-
-Load the extension pointing at the project root (not `dist/`) when using `npm run dev`. Background service worker changes require refreshing the extension in `chrome://extensions/`.
-
----
-
-# API Architecture (Tab Injection) 🔌
-
-## The Problem: Why Tab Injection?
-
-Chrome's Manifest V3 service workers **cannot spoof the `Origin` header**. When the FleetEdge extension service worker makes a direct fetch to FleetEdge's API, Chrome sets `Origin: chrome-extension://[extension-id]`, which FleetEdge rejects with a 403 Forbidden.
-
-## The Solution: Execute Fetch Inside the Browser Tab
-
-The extension uses **`chrome.scripting.executeScript`** to inject and run the fetch call *inside* the open FleetEdge browser tab, not from the service worker. This means:
-
-- The request originates from `https://fleetedge.home.tatamotors`, so `Origin` is correct
-- The browser's full session cookie jar is available via `credentials: 'include'`
-- The fetch returns real FleetEdge API responses without 403 errors
-
-### Code Flow
-
-```javascript
-// In service worker (extension/src/background/fleetedgeApi.js)
-async function fleetFetch(path, token, body) {
-  const tab = await getFleetEdgeTab(); // Must have FleetEdge tab open
-  const results = await chrome.scripting.executeScript({
-    target: { tabId: tab.id },
-    func: async (fetchUrl, bearerToken, requestBody) => {
-      // This func runs INSIDE the FleetEdge tab
-      const res = await fetch(fetchUrl, {
-        method: 'POST',
-        headers: { 'Authorization': `Bearer ${bearerToken}` },
-        credentials: 'include', // Use browser's session cookies
-        body: JSON.stringify(requestBody),
-      });
-      return { ok: res.ok, status: res.status, text: await res.text() };
-    },
-    args: [url, token, body],
-  });
-  // Parse and return result from the tab
-}
-```
-
-### Required Permissions
-
-The [manifest.json](extension/manifest.json) includes:
-
-```json
-"permissions": ["webRequest", "storage", "alarms", "notifications", "scripting", "tabs"]
-```
-
-- `scripting` — inject scripts into pages
-- `tabs` — query for open FleetEdge tabs
-
-### User Experience
-
-- **FleetEdge tab must stay open** in the browser (can be in background/hidden)
-- If user closes the FleetEdge tab, the extension cannot poll or fetch data
-- Extension popups alert users to "Keep FleetEdge open in a tab" if it detects no tab
-
----
-
-# First-time setup (UX) ✅
-
-1. Click the extension icon → **Settings** (⚙️)
-2. Enter your **backend URL** and **backend auth token** (system token)
+1. Click the extension icon → **Sign In** with your backend credentials (email/mobile + password)
+2. Only OWNER, MANAGER, or SUPER_ADMIN roles can use the extension
 3. Open FleetEdge in a tab and log in normally
-4. The extension captures the token automatically (you’ll see a green badge)
-5. Use **Refresh Vehicles** to populate registration→VIN map
-6. Use **Poll Tasks Now** to test a single cycle
+4. Click **Connect FleetEdge** in the extension popup
+5. The extension reads the token and links it to your backend account
+6. The backend starts processing tasks automatically every 5 minutes
+7. Click **Process Tasks Now** to test immediately
 
 ---
 
-# Backend integration (required endpoints) 🔌
+## Backend Integration Guide
 
-The extension authenticates to your backend with a **system token** you configure in the extension. Each request includes:
+The extension communicates with your backend over JSON REST APIs with Bearer token auth. The backend handles all FleetEdge interactions autonomously.
+
+### Authentication
+
+Every request from the extension includes:
 
 ```
-Authorization: Bearer <system_token>
+Authorization: Bearer <backend_jwt>
 Content-Type: application/json
 ```
 
-Implement the following endpoints:
+### FleetEdge Proxy Endpoints
 
----
+These endpoints manage the FleetEdge connection:
 
-## `GET /tasks/pending` — required
+| Method | Endpoint | Description |
+|--------|----------|-------------|
+| POST | `/api/extension/fleetedge/link-token` | Link a FleetEdge token to the user |
+| GET | `/api/extension/fleetedge/status` | Get connection status + task counts |
+| POST | `/api/extension/fleetedge/unlink` | Unlink FleetEdge token |
+| POST | `/api/extension/fleetedge/fetch-vehicles` | Fetch vehicles (on-demand) |
+| POST | `/api/extension/fleetedge/process-tasks` | Trigger task processing now |
 
-Return `tasks: []` or a list of pending tasks. Use **explicit range** (recommended) or **point-in-time** (legacy).
-
-**Explicit range example response**
+#### POST `/fleetedge/link-token`
 
 ```json
+// Request
+{ "token": "<jwt>", "fleetId": "U17380935682118922260" }
+
+// Response (200)
+{ "data": { "status": "linked", "fleetId": "U17380935682118922260", "tokenExp": 1773279972 } }
+
+// Response (400) — invalid token
+{ "message": "FleetEdge token validation failed — token may be expired or invalid" }
+```
+
+#### GET `/fleetedge/status`
+
+```json
+// Response (200)
 {
-  "tasks": [
-    {
-      "id": "task_001",
-      "vehicle_number": "MH12AB1234",
-      "from_date": "2026-02-14",
-      "from_time": "03:20",
-      "to_date": "2026-02-18",
-      "to_time": "14:50"
-    }
-  ]
+  "data": {
+    "status": "linked",          // "linked" | "expired" | "unlinked"
+    "fleetId": "U17380935682118922260",
+    "tokenExp": 1773279972,
+    "linkedAt": "2026-03-10T12:00:00.000Z"
+  }
 }
 ```
 
-**Point-in-time example**
+#### POST `/fleetedge/process-tasks`
 
 ```json
+// Response (200)
 {
-  "tasks": [
-    {
-      "id": "task_002",
-      "vehicle_number": "GJ01CD5678",
-      "refuel_date": "2026-02-21",
-      "refuel_time": "14:30"
-    }
-  ]
+  "data": {
+    "processed": 5,
+    "succeeded": 4,
+    "failed": 1,
+    "errors": ["VIN not found for WB99X0000"]
+  }
 }
 ```
 
-**Notes**
+### Existing Extension Endpoints
 
-* If both explicit and point-in-time fields exist, explicit range takes precedence.
-* Always return an array (empty when nothing to do).
-* Tasks should be unique by `id`.
+These endpoints remain unchanged from v1:
 
----
+| Method | Endpoint | Description |
+|--------|----------|-------------|
+| POST | `/api/extension/auth/login` | Login with email/mobile + password |
+| GET | `/api/extension/vehicles` | List organization vehicles |
+| GET | `/api/extension/status` | Backend status + task counts |
+| POST | `/api/extension/telemetry/ingest` | LEMU telemetry event ingestion |
 
-## `POST /tasks/:taskId/result` — required
+### CORS Configuration
 
-Called when extension obtains fuel data.
-
-**Payload example**
-
-```json
-{
-  "task_id": "task_001",
-  "results": [
-    {
-      "vin": "MAT828113S2C05629",
-      "registration_number": "MH12AB1234",
-      "fuel_used": 45.2,
-      "distance_covered": 320.5,
-      "avg_speed": 42.3,
-      "max_speed": 85.0,
-      "idle_duration": 7200,
-      "running_duration": 27400,
-      "stoppage_duration": 3600,
-      "mileage": 7.09
-    }
-  ],
-  "submitted_at": "2026-02-21T09:45:12.345Z"
-}
-```
-
-**Your backend should**
-
-1. Insert the results into DB (or update)
-2. Mark task as `completed`
-3. Return `{ "success": true }`
-
----
-
-## `POST /tasks/:taskId/error` — required
-
-If a task fails, extension reports the error here.
-
-**Payload example**
-
-```json
-{
-  "task_id": "task_001",
-  "error": "VIN not found for registration: MH12AB1234",
-  "reported_at": "2026-02-21T09:45:12.345Z"
-}
-```
-
-**Your backend should**
-
-* Log the error
-* Mark `status: failed` (or `retry`)
-* Return `{ "success": true }`
-
----
-
-## `POST /fuel-data/ingest` — optional
-
-Manual-query results from popup (distinct from task flow).
-
-**Payload example**
-
-```json
-{
-  "source": "manual_query",
-  "vin": "MAT828113S2C05629",
-  "registration": "MH12AB1234",
-  "identifier": "MH12AB1234",
-  "fleetId": "fleet-abc-123",
-  "fromIst": "2026-02-20 08:00",
-  "toIst": "2026-02-21 18:00",
-  "fromUtc": "2026-02-20T02:30:00.000Z",
-  "toUtc": "2026-02-21T12:30:00.000Z",
-  "fetchedAt": "2026-02-21T09:45:12.345Z",
-  "resultCount": 3,
-  "results": [ /* ... */ ],
-  "rawResponse": {}
-}
-```
-
----
-
-# CORS configuration 💡
-
-Allow Chrome extensions and dev server origin:
-
-```js
+```javascript
 const cors = require('cors');
 
 app.use(cors({
   origin: [
-    /^chrome-extension:\/\//, // allow all extensions
-    'http://localhost:5173'    // vite dev server
+    /^chrome-extension:\/\//,   // All extension origins
+    'http://localhost:5173',     // Vite dev server
   ],
-  credentials: true
+  credentials: true,
 }));
 ```
 
 ---
 
-# Suggested DB schema (MongoDB) 🗄️
+## Chrome Web Store Compliance (v2.0.0)
 
-`refuel_tasks`:
+The v2.0.0 refactoring was specifically designed for CWS compliance:
 
-```js
+| Requirement | How We Comply |
+|-------------|---------------|
+| No `webRequest` for token interception | Content script reads from localStorage (declared in manifest) |
+| No `scripting` for tab injection | Backend calls FleetEdge APIs server-side |
+| No `tabs` permission | Not needed — content script is auto-injected by Chrome |
+| Minimal `host_permissions` | Only `http://localhost:*/*` (for backend) |
+| Content script must be declared | `content_scripts` in manifest.json, not programmatic injection |
+
+### Permissions
+
+```json
 {
-  _id: ObjectId,
-  vehicle_number: "MH12AB1234",
-  from_date: "2026-02-14",
-  from_time: "03:20",
-  to_date: "2026-02-18",
-  to_time: "14:50",
-  status: "pending",
-  created_at: ISODate,
-  completed_at: ISODate,
-  last_error: "string",
-  error_at: ISODate
-}
-```
-
-`fuel_consumption_data`:
-
-```js
-{
-  _id: ObjectId,
-  task_id: "task_001",
-  vin: "MAT828113S2C05629",
-  registration_number: "MH12AB1234",
-  fuel_used: Number,
-  distance_covered: Number,
-  avg_speed: Number,
-  max_speed: Number,
-  idle_duration: Number,
-  running_duration: Number,
-  stoppage_duration: Number,
-  mileage: Number,
-  submitted_at: ISODate,
-  created_at: ISODate,
-  source: "task" | "manual_query"
+  "permissions": ["storage", "alarms", "notifications"],
+  "host_permissions": ["http://localhost:*/*"],
+  "content_scripts": [
+    {
+      "matches": ["https://fleetedge.home.tatamotors/*"],
+      "js": ["src/content/networkSpy.js"],
+      "run_at": "document_start",
+      "world": "MAIN"
+    },
+    {
+      "matches": ["https://fleetedge.home.tatamotors/*"],
+      "js": ["src/content/fleetedgeTokenReader.js"],
+      "run_at": "document_idle",
+      "world": "ISOLATED"
+    }
+  ]
 }
 ```
 
 ---
 
-# Environment variables 🧭
-
-Copy `.env.example` → `.env` and edit.
-
-Important keys (Vite prefix used for extension build):
+## Project Structure
 
 ```
-VITE_BACKEND_BASE_URL=http://localhost:3000/api
-VITE_POLL_INTERVAL_MINUTES=5
-VITE_INTER_TASK_DELAY_MS=500
-VITE_VIN_CACHE_TTL_HOURS=24
-VITE_TOKEN_EXPIRY_BUFFER_SECONDS=60
-VITE_SEARCH_WINDOW_MINUTES=30
-VITE_LOG_RETENTION_COUNT=500
-VITE_MAX_RETRY_ATTEMPTS=2
-```
-
----
-
-# Development 🧩
-
-* `npm run dev` — dev mode (hot reload for popup)
-* `npm run build` — production build → `dist/`
-* `npm test` — run Vitest unit tests
-
-> Note: Background service worker must be reloaded from `chrome://extensions/` after code changes.
-
----
-
-# Troubleshooting 🐞
-
-| Problem              | Quick fix                                                                                              |
-| -------------------- | ------------------------------------------------------------------------------------------------------ |
-| Token not capturing  | Visit FleetEdge Reports page so extension sees an API call with `Authorization` header                 |
-| Token expired        | Log into FleetEdge again — token is captured automatically                                             |
-| Vehicle count = 0    | Click **Refresh Vehicles**; ensure token valid                                                         |
-| Tasks not processing | Verify backend URL and system token in Settings; check service worker console (`chrome://extensions/`) |
-| Build fails          | Delete `node_modules` + `package-lock.json`, run `npm install`. Use Node 18+                           |
-
----
-
-# Security & privacy 🔐
-
-* **FleetEdge token** is stored in `chrome.storage.local` and **never** sent to your backend.
-* **Backend token** is the only token the extension sends to your backend. You control how validation is done (JWT, DB lookup, etc.).
-* The extension only requests `webRequest` permission to read Authorization headers for FleetEdge domains.
-* Logs in extension are batched and kept local; you control retention via `VITE_LOG_RETENTION_COUNT`.
-
----
-
-# Packaging & publishing 🧾
-
-* Verify `manifest.json` (MV3) and icons exist (16/48/128)
-* Test on Chrome Canary / stable, check extension permissions and service worker lifecycle
-* Consider a short README.md and changelog for the Chrome Web Store listing
-
----
-
-# Contribution & Code of Conduct 🤝
-
-PRs welcome. Keep changes small and add unit tests where possible (Vitest). Please follow the existing coding style.
-
----
-
-# License ⚖️
-
-Choose a license (e.g. MIT) and add `LICENSE` file to the repo.
-
----
-
-# Quick copy-paste README header for your repo (optional)
-
-```md
-# FleetEdge Fuel Monitor — Chrome Extension 🚗⛽️
-
-Passive browser-based scraper for FleetEdge that captures in-browser tokens and fetches fuel-consumption data for your backend.
-
-See the full README for installation, backend API spec, development, and security notes.
+extension/
+├── src/
+│   ├── main.jsx                      # Popup entry point
+│   ├── index.css                     # Global styles
+│   ├── background/
+│   │   ├── index.js                  # Service worker entry, message router
+│   │   ├── fleetedgeLink.js          # FleetEdge token link flow (content script → backend)
+│   │   ├── backendApi.js             # Backend API client (auth, status, vehicles)
+│   │   ├── config.js                 # Configuration constants
+│   │   ├── logger.js                 # Batched logging (buffer → flush every 2s)
+│   │   ├── telemetry.js              # LEMU telemetry (7-layer logger)
+│   │   ├── utils.js                  # JWT decode, IST→UTC, retry, metrics
+│   │   └── __tests__/               # Vitest unit tests (153 tests)
+│   ├── content/
+│   │   └── fleetedgeTokenReader.js   # Declared content script (reads FleetEdge JWT)
+│   └── popup/
+│       ├── Popup.jsx                 # React popup UI (status, settings, FleetEdge link)
+│       └── Popup.css                 # Popup styles
+├── public/icons/                     # Extension icons (16, 48, 128px)
+├── manifest.json                     # Chrome MV3 manifest
+├── vite.config.js                    # Build config (@crxjs/vite-plugin)
+└── package.json
 ```
 
 ---
+
+## Development
+
+```bash
+npm run dev     # Vite dev server with hot reload
+npm run build   # Production build → dist/
+npx vitest run  # Run all 153 unit tests
+```
+
+When running `npm run dev`, load the extension from the project root (not `dist/`). Popup UI changes hot-reload. Background service worker changes require clicking the refresh icon on `chrome://extensions/`.
+
+---
+
+## Troubleshooting
+
+| Problem | Solution |
+|---------|----------|
+| "Connect FleetEdge" fails | Open FleetEdge in a tab and log in first. The content script needs an active FleetEdge page with a token in localStorage |
+| Status shows "Expired" | Log into FleetEdge again in any tab, then click "Connect FleetEdge" to re-link |
+| Tasks not processing | Check backend logs. The cron runs every 5 minutes. Click "Process Tasks Now" to trigger immediately |
+| Vehicle count is 0 | Backend fetches vehicles via FleetEdge proxy. Check FleetEdge token is linked and valid |
+| Build fails | Delete `node_modules` + `package-lock.json`, run `npm install`. Requires Node.js 18+ |
+
+---
+
+## Security
+
+- **FleetEdge token** is read by a declared content script and sent to the backend via HTTPS
+- **Backend token** is only sent to your configured backend URL
+- The content script only runs on `fleetedge.home.tatamotors` — cannot read data from other sites
+- The extension requests **no sensitive permissions** (no webRequest, scripting, tabs)
+- All FleetEdge API calls happen server-side with proper auth headers
+
+---
+
+## Migration from v1.x
+
+v2.0.0 is a breaking architectural change. Key differences:
+
+| Feature | v1.x | v2.0.0 |
+|---------|------|--------|
+| FleetEdge API calls | Extension (tab injection) | Backend (server-side) |
+| Token capture | `webRequest` listener | Declared content script |
+| Task processing | Extension polls + processes | Backend cron (5 min) |
+| Permissions needed | `webRequest`, `scripting`, `tabs` | `storage`, `alarms`, `notifications` |
+| FleetEdge tab required | Must stay open always | Only needed during "Connect" |
+| Manual query | In popup (inject fetch) | Removed (backend handles all) |
+| CWS compliant | No | **Yes** |
+
+**Deleted files from v1.x:**
+- `tokenCapture.js` — Replaced by declared content script
+- `fleetedgeApi.js` — Replaced by `FleetEdgeProxyService` (backend)
+- `taskPoller.js` — Replaced by `FleetEdgeCronService` (backend)

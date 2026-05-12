@@ -51,13 +51,19 @@ git push --no-verify origin main
 
 ### Tests Match Reality
 
-The test suite has been updated to test the **actual working implementation** (tab injection via `chrome.scripting.executeScript`). All **55 tests pass**:
+The test suite tests the **actual working implementation** (tab injection via `chrome.scripting.executeScript`). All **186 tests pass** across **9 files**:
 
-- `fleetedgeApi.test.js` (17 tests) — Tab injection, endpoint validation, error handling  
-- `taskPoller.test.js` (9 tests) — Poll cycles, VIN resolution, IST ↔ UTC conversion  
-- `backendApi.test.js` (7 tests) — Backend API calls, error codes, fire-and-forget logging  
-- `utils.test.js` (16 tests) — Pure functions: retries, time conversion, JWT parsing  
-- `logger.test.js` (6 tests) — Buffered logging, module names, limits  
+| File | Tests | Coverage |
+|------|------:|----------|
+| `utils.test.js` | 16 | Pure functions: retries, time conversion, JWT parsing |
+| `backendApi.test.js` | 19 | Backend API calls, error codes, auth state management |
+| `fleetedgeApi.test.js` | 20 | Tab injection, endpoint validation, error handling |
+| `taskPoller.test.js` | 12 | Poll cycles, VIN resolution, IST ↔ UTC conversion |
+| `integration.test.js` | 13 | End-to-end flows: login → tasks → submit, auth lifecycle |
+| `telemetry.test.js` | 45 | LEMU telemetry: 7-layer logger, batching, error tracking |
+| `logger.test.js` | 6 | Buffered logging, module names, limits |
+| **`edge-cases-utils.test.js`** | **46** | **Error boundaries for all utility functions** |
+| **`edge-cases-integration.test.js`** | **9** | **Module-level edge cases: timeout, 401 clear, VIN fallback** |
 
 ---
 
@@ -68,11 +74,15 @@ All test files live inside the module they test, under a `__tests__` directory:
 ```
 src/background/
 ├── __tests__/
-│   ├── utils.test.js        ← pure-function tests (no Chrome API)
-│   ├── logger.test.js       ← buffered logger, storage interactions
-│   ├── fleetedgeApi.test.js ← fetch mocking, API error handling
-│   ├── backendApi.test.js   ← backend fetch helpers, fire-and-forget
-│   └── taskPoller.test.js   ← poll-cycle integration, VIN resolution
+│   ├── utils.test.js                  ← pure-function tests (no Chrome API)
+│   ├── logger.test.js                 ← buffered logger, storage interactions
+│   ├── fleetedgeApi.test.js           ← fetch mocking, API error handling
+│   ├── backendApi.test.js             ← backend fetch helpers, fire-and-forget
+│   ├── taskPoller.test.js             ← poll-cycle integration, VIN resolution
+│   ├── integration.test.js            ← end-to-end multi-module flows
+│   ├── telemetry.test.js              ← LEMU telemetry collector tests
+│   ├── edge-cases-utils.test.js       ← error boundaries (pure functions)
+│   └── edge-cases-integration.test.js ← error boundaries (mocked modules)
 ```
 
 Tests are discovered by the glob pattern in `vite.config.js`:
@@ -200,6 +210,57 @@ exclude: ['src/background/__tests__/**']
 ```
 
 Aim for **≥ 80 % statement coverage** on `utils.js`, `fleetedgeApi.js`, and `backendApi.js`. The `taskPoller.js` poll-cycle path is harder to unit-test fully because it orchestrates multiple services — integration/E2E tests are more appropriate for its end-to-end behaviour.
+
+---
+
+## Why Edge Cases Matter — Tests You Must NOT Skip
+
+Edge-case tests (`edge-cases-utils.test.js` and `edge-cases-integration.test.js`) are the **most important tests in the suite**. Each group prevents a specific production failure:
+
+### Pure Function Edge Cases (46 tests)
+
+| Test Group | Tests | WHY THIS MATTERS |
+|------------|------:|-------------------|
+| **decodeJwtPayload — malformed tokens** | 7 | Corrupted JWTs from FleetEdge must not crash the extension. Garbage in → `null` out, never an exception. |
+| **redactToken — short/empty tokens** | 6 | Tokens shorter than 10 chars must still redact safely for logging without exposing secrets. |
+| **normalizeRegistration — special chars** | 8 | Indian plates come with dots, dashes, spaces, slashes. `MH.12-AB 1234` must normalize to `MH12AB1234`. Bug fixed: was only stripping spaces/dashes, now strips ALL non-alphanumeric. |
+| **buildUtcWindow — midnight/timezone edge** | 5 | IST midnight (00:00) converts to previous day in UTC (18:30). Off-by-one-day bugs corrupt fuel data windows. |
+| **checkTokenExpiry — invalid exp** | 9 | String `exp` values, `null`, `0`, and already-expired tokens must all return `{ valid: false }`. Bug fixed: was accepting string exp values. |
+| **withRetry — 401/403 immediate throw** | 4 | Auth errors must NOT be retried — retrying a 401 wastes time and can trigger rate limiting. |
+| **istToUtc — invalid dates** | 3 | Garbage date strings must return `null`, not `Invalid Date` strings that silently flow downstream. |
+| **formatUtcDatetime — null/edge values** | 4 | `null`, empty string, and epoch-zero must produce safe fallback output. |
+
+### Integration Edge Cases (9 tests)
+
+| Test Group | Tests | WHY THIS MATTERS |
+|------------|------:|-------------------|
+| **timedFetch timeout** | 1 | Without timeout, a hung backend makes the extension wait **forever**. AbortController must fire. |
+| **login missing token** | 1 | Backend returning `{ data: {} }` (no token) must throw, not silently store `undefined`. |
+| **401 clears auth state** | 1 | Expired JWT must clear stored auth — otherwise user is stuck in an infinite re-login loop. |
+| **empty vehicles response** | 1 | Backend returning `{ data: {} }` (no vehicles array) must return `[]`, not crash on `.map()`. |
+| **multiple FleetEdge tabs** | 1 | Extension must consistently pick the first tab, not randomly select one. |
+| **null executeScript result** | 1 | If tab injection returns null (page not ready), extension must throw a clear error. |
+| **VIN last-4 fallback** | 1 | When exact registration match fails, last-4-digit matching prevents task failure for non-standard registrations. |
+| **missing vehicle_number** | 1 | Tasks arriving without `vehicle_number` must report a validation error, not crash the poller. |
+| **zero fuel_used** | 1 | `fuel_used: 0` is valid data (idle vehicle) — must be submitted, not filtered as falsy. |
+
+### Real Bugs Caught by Edge Cases
+
+1. **`normalizeRegistration` keeping dots/slashes** — Regex was `/[\s-]/g` (only spaces + dashes). Indian plates with dots (`MH.12.AB.1234`) and slashes passed through unstripped. Fixed: `/[^a-zA-Z0-9]/g`.
+
+2. **`checkTokenExpiry` accepting string exp** — `if (!exp)` missed the case where `exp` is a non-empty string like `"invalid"`. The comparison `exp < now` with a string returns `false`, so expired tokens appeared valid. Fixed: added `typeof exp !== 'number'` check.
+
+Both bugs were **caught by edge-case tests first**, then fixed in the source code.
+
+### Mock Isolation Pattern (`vi.doMock`)
+
+The integration edge-case file uses `vi.doMock()` instead of `vi.mock()` because:
+
+- `vi.mock()` is **hoisted** to file scope — it affects ALL tests in the file
+- `vi.doMock()` is **not hoisted** — it only applies after `vi.resetModules()`
+- Each `describe` block gets its own helper function (`setupBackendApi`, `setupFleetedgeApi`, `setupTaskPoller`) that sets up fresh mocks
+
+This pattern is the correct way to test modules with different mock configurations in the same file.
 
 ---
 

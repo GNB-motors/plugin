@@ -1,3 +1,5 @@
+import { config } from './config.js';
+
 const LOG_LEVELS = {
   DEBUG: 0,
   INFO: 1,
@@ -8,7 +10,7 @@ const LOG_LEVELS = {
 const CURRENT_LOG_LEVEL = LOG_LEVELS.DEBUG;
 const FLUSH_INTERVAL_MS = 2000;
 const FLUSH_THRESHOLD = 10;
-const MAX_LOG_ENTRIES = 500;
+const MAX_LOG_ENTRIES = config?.LOG_RETENTION_COUNT ?? 500;
 
 let buffer = [];
 let flushTimer = null;
