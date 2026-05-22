@@ -1,0 +1,52 @@
+name: Bug report
+description: Something is broken
+labels: ["bug"]
+body:
+  - type: markdown
+    attributes:
+      value: "Before filing: check the [troubleshooting guide](../blob/main/extension/README.md#troubleshooting)."
+
+  - type: textarea
+    id: description
+    attributes:
+      label: What happened?
+      description: What did you expect vs what actually happened?
+    validations:
+      required: true
+
+  - type: textarea
+    id: steps
+    attributes:
+      label: Steps to reproduce
+      placeholder: |
+        1. Open FleetEdge tab
+        2. Click Connect
+        3. ...
+    validations:
+      required: true
+
+  - type: input
+    id: version
+    attributes:
+      label: Extension version
+      description: Found in chrome://extensions — should be 0.0.0.2 or later
+    validations:
+      required: true
+
+  - type: dropdown
+    id: browser
+    attributes:
+      label: Browser
+      options:
+        - Chrome
+        - Edge
+        - Other Chromium
+    validations:
+      required: true
+
+  - type: textarea
+    id: console
+    attributes:
+      label: Console errors (if any)
+      description: Open DevTools on the popup (right-click extension icon → Inspect), paste errors here
+      render: shell
