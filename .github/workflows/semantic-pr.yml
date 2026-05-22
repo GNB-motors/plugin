@@ -1,0 +1,53 @@
+name: Semantic PR
+
+on:
+  pull_request:
+    types: [opened, edited, synchronize, reopened]
+
+jobs:
+  semantic-pr:
+    name: Validate PR title
+    runs-on: ubuntu-latest
+
+    steps:
+      - uses: amannn/action-semantic-pull-request@v5
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        with:
+          types: |
+            feat
+            fix
+            docs
+            style
+            refactor
+            perf
+            test
+            build
+            ci
+            chore
+            revert
+          scopes: |
+            extension
+            popup
+            background
+            content
+            ci
+            docs
+            tests
+            deps
+            manifest
+            api
+            auth
+            fleetedge
+            telemetry
+          requireScope: false
+          subjectPattern: ^[A-Z].+$
+          subjectPatternError: |
+            PR title must start with a capital letter after the type/scope.
+            Examples:
+              ✅ feat(extension): Add multi-account support
+              ✅ fix(popup): Resolve auth token refresh bug
+              ❌ feat: add support (starts with lowercase)
+          wip: true
+          validateSingleCommit: false
+          validateSingleCommitMatchesPrTitle: false
