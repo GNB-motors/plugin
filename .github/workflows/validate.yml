@@ -1,0 +1,77 @@
+name: Validate
+
+on:
+  pull_request:
+    branches: [Devayan, updated-design, main]
+  push:
+    branches: [Devayan, updated-design, main]
+
+jobs:
+  build-and-test:
+    name: Lint, test, build
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: extension
+
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+          cache: 'npm'
+          cache-dependency-path: extension/package-lock.json
+
+      - name: Install dependencies
+        run: npm ci
+
+      - name: Lint
+        run: npm run lint
+
+      - name: Unit + integration tests
+        run: npm test
+
+      - name: Build
+        run: npm run build
+
+      - name: Verify dist artifacts
+        run: |
+          test -f dist/manifest.json || (echo "manifest.json missing from dist/" && exit 1)
+          test -f dist/service-worker-loader.js || (echo "service worker missing from dist/" && exit 1)
+
+  cws-policy-check:
+    name: CWS policy pre-flight
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: extension
+
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+
+      - name: Manifest policy check
+        run: node scripts/check-manifest-policy.cjs
+
+      - name: Source secrets / banned-pattern scan
+        run: node scripts/check-secrets.cjs
+
+  security-audit:
+    name: Dependency security audit
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: extension
+
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+          cache: 'npm'
+          cache-dependency-path: extension/package-lock.json
+
+      - name: npm audit (high+critical only)
+        run: npm audit --audit-level=high
