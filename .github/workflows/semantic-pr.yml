@@ -41,13 +41,13 @@ jobs:
             fleetedge
             telemetry
           requireScope: false
-          subjectPattern: ^[A-Z].+$
+          subjectPattern: ^[A-Za-z].+$
           subjectPatternError: |
-            PR title must start with a capital letter after the type/scope.
+            PR title subject must start with a letter after the type/scope.
             Examples:
               ✅ feat(extension): Add multi-account support
-              ✅ fix(popup): Resolve auth token refresh bug
-              ❌ feat: add support (starts with lowercase)
+              ✅ fix(popup): resolve auth token refresh bug
+              ❌ feat: 123 fix (starts with number)
           wip: true
           validateSingleCommit: false
           validateSingleCommitMatchesPrTitle: false
