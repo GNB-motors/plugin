@@ -24,7 +24,7 @@ Features
 • Sign in once with your gnbedge account (email or mobile + password)
 • One-click "Connect Fleet Portal" that links your existing telematics session — no separate password to manage
 • Live task status: pending, completed, failed, and flagged counts
-• On-demand "Process Tasks Now" trigger
+• On-demand "Pull from FleetEdge now" trigger
 • Automatic 24-hour token expiry handling
 • Local logs viewer for support and troubleshooting
 
@@ -147,7 +147,7 @@ The host permission `https://fleetedge.home.tatamotors/*` references a Tata Moto
 ## 7. Upload checklist
 
 - [ ] `npm run build` produces a clean `dist/`
-- [ ] `dist/manifest.json` has version `0.0.0.1`, name `gnbedge`, no `tabs` permission, no `localhost` host
+- [ ] `dist/manifest.json` has version `0.0.0.2`, name `gnbedge`, no `tabs` permission, no `localhost` host
 - [ ] `dist/` does NOT contain `vite.svg`, `icons/README.md`, or any `*.map` files
 - [ ] Zip the **contents** of `dist/`, not the folder itself, so `manifest.json` is at the zip root
 - [ ] Privacy policy hosted at a public HTTPS URL

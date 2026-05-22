@@ -13,15 +13,24 @@ plugin/
 │   │   ├── content/        # Declared content scripts (networkSpy + tokenReader)
 │   │   └── popup/          # React popup UI
 │   ├── public/icons/       # Extension icons (16, 48, 128 px)
-│   ├── scripts/            # Build helpers (icon generation, zip packaging)
+│   ├── scripts/            # Build helpers + CWS policy & security checks
+│   │   ├── check-manifest-policy.cjs
+│   │   ├── check-secrets.cjs
+│   │   ├── build-zip.cjs
+│   │   └── upload-sourcemaps.cjs
+│   ├── e2e/                # Playwright smoke tests
+│   │   └── smoke.spec.js
+│   ├── playwright.config.js
 │   ├── manifest.json       # Source of truth for CWS submission
 │   ├── README.md           # End-user / dev-onboarding documentation
 │   ├── CHANGELOG.md        # Per-session change log (date-stamped, branch-stamped)
 │   ├── CWS_SUBMISSION.md   # Paste-ready content for the CWS Developer Dashboard
+│   ├── TESTING.md          # Testing guide + manual QA checklist
 │   └── package.json        # All npm scripts live here, NOT at repo root
 ├── .github/
-│   ├── workflows/          # CI (validate.yml runs lint + test + build on every PR)
-│   └── pull_request_template.md
+│   ├── workflows/          # CI (validate, smoke, codeql, dependency-review)
+│   ├── pull_request_template.md
+│   └── ISSUE_TEMPLATE/     # bug_report.yml + feature_request.yml
 ├── AGENTS.md               # This file
 └── CLAUDE.md               # 1-line include of AGENTS.md
 ```
@@ -30,9 +39,9 @@ plugin/
 
 ## Active branches
 
-- `Devayan` — currently the latest. Contains everything in `updated-design` plus the multi-account popup redesign. Releases are cut from here.
+- `Devayan` — currently the latest. Contains everything in `updated-design` plus the multi-account popup redesign, CI hardening, and security audits. Releases are cut from here.
 - `updated-design` — older, contains the CWS-compliance pass and the auto-refresh retry. Kept for history; new work should branch from `Devayan`.
-- `main` — not actively used; kept around as a stable pointer.
+- `main` — **protected production branch**. Has branch protection (1 approval + 4 required status checks). Workflow files and docs are seeded here so status checks work. Do not push directly.
 
 When the user says "push", confirm the target branch before pushing — branch policies vary per repo.
 
@@ -90,14 +99,15 @@ Endpoints the extension calls (all under `/api/extension/`):
 - `POST /auth/login`
 - `POST /fleetedge/link-token` (request body must include `token` and `fleetId`)
 - `GET /fleetedge/status`
-- `POST /fleetedge/unlink`
+- `POST /fleetedge/unlink/:accountId` (single account)
+- `POST /fleetedge/unlink` (all user's accounts)
 - `POST /fleetedge/process-tasks`
 
 The backend `linkToken` flow now (May 2026):
 1. Decodes the JWT to read `exp`.
 2. Calls FleetEdge `/api/vehicle-service/get-vin-for-dashboard` to validate the token.
 3. Calls FleetEdge `/api/user-service/get-user-document-master` to read the FleetEdge user's profile.
-4. Stores the token on `User`.
+4. Stores the token as an **AES-256-GCM-encrypted** `UserFleetEdgeToken` row (key: `FLEETEDGE_CRED_KEY`), not on `User`.
 5. Calls `resolveAndTag(orgId, 'EXTENSION', fleetId, null, friendlyName)` so the `FleetEdgeAccount` row has a human-readable name like `"Ajit Kumar Singh (email@domain.com)"` instead of the raw fleet ID.
 
 If the backend is changed in a way that breaks these contracts (e.g. renaming a field in the response body), the extension popup will silently fail. Always grep the extension for the endpoint path before changing a backend response shape.
@@ -121,7 +131,7 @@ If the backend is changed in a way that breaks these contracts (e.g. renaming a 
 - Add a new `chrome.*` permission to `manifest.json`.
 - Change the `name` field — it's "gnbedge" for CWS reasons (the original name "FleetEdge Fuel Monitor" triggered trademark concerns).
 - Push to `main`.
-- Remove or rename files in `extension/__tests__/` — the count `187 tests` is referenced in README and CHANGELOG.
+- Remove or rename files in `src/background/__tests__/` — the count `187 tests` is referenced in README and CHANGELOG.
 - Run `docker compose down -v` — wipes the local Mongo and the user has live data in it.
 
 ## Where to look when something is broken
@@ -129,7 +139,7 @@ If the backend is changed in a way that breaks these contracts (e.g. renaming a 
 | Symptom | First place to look |
 |---|---|
 | "Connect FleetEdge" fails | `src/background/fleetedgeLink.js` + check FleetEdge tab is open |
-| Tasks never process | Backend `FleetEdgeProxyService.processPendingTasksBatch` + check User has `fleetEdgeToken` field set |
+| Tasks never process | Backend `FleetEdgeCronService.runForOrg` / `FleetEdgePullService` + check the org has at least one `ACTIVE` `UserFleetEdgeToken` row (encrypted, not on `User`) |
 | Tests fail with "chrome.tabs.X is not a function" | Mock missing in `edge-cases-v2.test.js > makeStore` or per-test mock |
 | Build fails | Delete `extension/node_modules` + `package-lock.json`, reinstall |
 | CWS upload fails "manifest not at root" | Re-zip with `Compress-Archive -Path "dist\*"` (the `\*` is essential) |
