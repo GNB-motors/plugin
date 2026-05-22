@@ -1,0 +1,25 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 64 64" role="img" aria-label="gnbedge">
+  <defs>
+    <linearGradient id="gnb-logo-bg" x1="0" y1="0" x2="1" y2="1">
+      <stop offset="0" stop-color="#5a9bf8"></stop>
+      <stop offset="1" stop-color="#2563eb"></stop>
+    </linearGradient>
+    <linearGradient id="gnb-logo-shine" x1="0" y1="0" x2="0" y2="1">
+      <stop offset="0" stop-color="#ffffff" stop-opacity="0.28"></stop>
+      <stop offset="0.55" stop-color="#ffffff" stop-opacity="0"></stop>
+    </linearGradient>
+  </defs>
+
+  
+  <rect width="64" height="64" rx="14" fill="url(#gnb-logo-bg)"></rect>
+  <rect width="64" height="64" rx="14" fill="url(#gnb-logo-shine)"></rect>
+  <rect x="0.5" y="0.5" width="63" height="63" rx="13.5" fill="none" stroke="#1d4ed8" stroke-opacity="0.5"></rect>
+
+  
+  <path d="M14 38 L26 26 L38 38" fill="none" stroke="#ffffff" stroke-width="5" stroke-linecap="round" stroke-linejoin="round"></path>
+  <path d="M24 46 L36 34 L48 46" fill="none" stroke="#ffffff" stroke-width="5" stroke-linecap="round" stroke-linejoin="round" opacity="0.78"></path>
+
+  
+  <circle cx="48" cy="18" r="3.5" fill="#ffffff"></circle>
+  <circle cx="48" cy="18" r="6" fill="none" stroke="#ffffff" stroke-opacity="0.45" stroke-width="1.2"></circle>
+</svg>
