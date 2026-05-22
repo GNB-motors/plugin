@@ -11,11 +11,20 @@
     "preview": "vite preview",
     "test": "vitest run",
     "test:watch": "vitest",
-    "test:coverage": "vitest run --coverage"
+    "test:coverage": "vitest run --coverage",
+    "test:smoke": "playwright test",
+    "check:manifest": "node scripts/check-manifest-policy.cjs",
+    "check:secrets": "node scripts/check-secrets.cjs",
+    "check:security": "npm run check:manifest && npm run check:secrets && npm audit --audit-level=high"
   },
   "dependencies": {
     "react": "^19.2.0",
     "react-dom": "^19.2.0"
+  },
+  "overrides": {
+    "@crxjs/vite-plugin": {
+      "rollup": "^4.60.4"
+    }
   },
   "devDependencies": {
     "@crxjs/vite-plugin": "^2.0.0-beta.33",
@@ -23,12 +32,14 @@
     "@types/react": "^19.2.7",
     "@types/react-dom": "^19.2.3",
     "@vitejs/plugin-react": "^5.1.1",
+    "@vitest/coverage-v8": "^3.0.0",
     "eslint": "^9.39.1",
     "eslint-plugin-react-hooks": "^7.0.1",
     "eslint-plugin-react-refresh": "^0.4.24",
     "globals": "^16.5.0",
+    "sharp": "^0.34.5",
     "vite": "^7.3.1",
     "vitest": "^3.0.0",
-    "@vitest/coverage-v8": "^3.0.0"
+    "@playwright/test": "^1.48.0"
   }
 }
