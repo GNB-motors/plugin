@@ -2,6 +2,59 @@
 
 ---
 
+## [2026-05-22] — branch: Devayan
+
+### CI hardening, security audits, and repo automation
+
+#### New CI workflows (`.github/workflows/`)
+
+| Workflow | What it does | Status check name |
+|---|---|---|
+| `validate.yml` | Lint + unit tests (187) + build + CWS manifest policy + secrets scan + `npm audit --audit-level=high` | `build-and-test`, `cws-policy-check`, `security-audit` |
+| `smoke.yml` | Playwright loads `dist/` into Chromium, opens popup, asserts no console errors, screenshot artifact | `smoke` |
+| `codeql.yml` | GitHub static security analysis (XSS, injection) | `analyze (javascript)` |
+| `dependency-review.yml` | Blocks PRs introducing high-severity vulnerable dependencies | `dependency-review` |
+
+All four workflows run on every PR and push to `Devayan`, `updated-design`, and `main`.
+
+#### New security checks (`extension/scripts/`)
+
+- `check-manifest-policy.cjs` — Banned permissions (`webRequest`, `scripting`, `tabs`), host rules (FleetEdge stays in `optional_host_permissions`), CSP, version format, icon existence, content script existence.
+- `check-secrets.cjs` — Hardcoded API keys, `eval()`, `document.write`, remote imports, JWTs, AWS keys.
+
+Run locally:
+```bash
+npm run check:manifest
+npm run check:secrets
+npm run check:security   # both above + npm audit --audit-level=high
+```
+
+#### Playwright smoke test (`extension/e2e/smoke.spec.js`)
+
+- Loads the built `dist/` extension into a persistent Chromium context.
+- Navigates to `chrome-extension://<id>/index.html`.
+- Asserts the popup renders (h1 "gnbedge" visible) and captures console errors.
+- Screenshot saved to `test-results/popup.png` for CI debugging.
+
+Run locally (requires `npm run build` first):
+```bash
+npm run test:smoke
+```
+
+#### Dependency & build fixes
+
+- Added `npm overrides` to force `@crxjs/vite-plugin` → `rollup@4.60.4`, resolving pre-existing high-severity audit failures.
+- Updated `.eslintignore` to exclude built asset directories (`gnbedge-v0.0.0.2/**`).
+
+#### Repo automation
+
+- `.github/pull_request_template.md` — PR template with CWS surface-area checklist.
+- `.github/ISSUE_TEMPLATE/bug_report.yml` — Structured bug report form.
+- `.github/ISSUE_TEMPLATE/feature_request.yml` — Structured feature request form.
+- `AGENTS.md` — Contributor guide: repository layout, branch conventions, CWS constraints, test conventions, backend integration.
+
+---
+
 ## [2026-05-10] — branch: updated-design
 
 ### Auto-refresh FleetEdge tab on connect failure

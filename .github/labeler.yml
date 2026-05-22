@@ -1,0 +1,49 @@
+# Auto-labeler configuration for PRs based on changed files
+# Uses actions/labeler to automatically apply labels
+
+area:extension:
+  - extension/src/**/*
+  - extension/public/**/*
+  - extension/manifest.json
+  - extension/index.html
+  - extension/vite.config.*
+
+area:ci:
+  - .github/workflows/*
+  - .github/labeler.yml
+  - .github/pull_request_template.md
+  - .github/ISSUE_TEMPLATE/*
+
+area:tests:
+  - extension/e2e/**/*
+  - extension/**/*.test.*
+  - extension/**/__tests__/**/*
+  - extension/playwright.config.*
+  - extension/vitest.config.*
+
+documentation:
+  - extension/*.md
+  - extension/**/*.md
+  - '*.md'
+  - '**/*.md'
+
+dependencies:
+  - extension/package.json
+  - extension/package-lock.json
+  - '**/package.json'
+  - '**/package-lock.json'
+
+javascript:
+  - extension/src/**/*.js
+  - extension/**/*.js
+
+security-risk:high:
+  - extension/manifest.json
+  - extension/scripts/check-*.cjs
+  - extension/src/background/auth.js
+  - extension/src/background/backendApi.js
+
+security-risk:medium:
+  - extension/package.json
+  - extension/package-lock.json
+  - .github/workflows/*

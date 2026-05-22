@@ -32,7 +32,7 @@ This repository uses [Husky](https://typicode.github.io/husky/) to enforce code 
 
 ### What Happens on `git push`
 
-When you run `git push origin main`, the `.husky/pre-push` hook automatically runs from the repository root:
+When you run `git push origin Devayan`, the `.husky/pre-push` hook automatically runs from the repository root:
 
 ```bash
 cd extension
@@ -46,12 +46,12 @@ If **either linting or tests fail**, the push is blocked. You must fix the issue
 
 ```bash
 # Force push without running hooks (use sparingly!)
-git push --no-verify origin main
+git push --no-verify origin Devayan
 ```
 
 ### Tests Match Reality
 
-The test suite tests the **actual working implementation** (tab injection via `chrome.scripting.executeScript`). All **186 tests pass** across **9 files**:
+The test suite tests the **actual working implementation** (tab injection via `chrome.scripting.executeScript`). All **187 tests pass** (2 skipped) across **9 files**:
 
 | File | Tests | Coverage |
 |------|------:|----------|
@@ -275,16 +275,52 @@ This pattern is the correct way to test modules with different mock configuratio
 
 ---
 
-## Continuous Integration
+## Smoke Tests (Playwright)
 
-To run tests in CI (GitHub Actions example):
+A headed Chromium smoke test loads the built extension from `dist/` and verifies the popup renders without console errors:
 
-```yaml
-- name: Test
-  working-directory: extension
-  run: |
-    npm ci
-    npm test
+```bash
+cd extension
+npm run build          # build first — smoke test needs dist/
+npm run test:smoke     # runs e2e/smoke.spec.js
 ```
 
-Add `npm run test:coverage` and upload the `coverage/` artifact if you want coverage tracking over time.
+The smoke test:
+1. Launches Chromium with `--load-extension=dist/`.
+2. Opens the extension action popup.
+3. Asserts the popup `<div>` is visible.
+4. Captures the first `ERROR` / `WARN` console message (if any) in the test output.
+5. Saves a screenshot on failure or on completion.
+
+This is also run in CI via the `smoke.yml` workflow.
+
+---
+
+## Continuous Integration
+
+The CI pipeline is defined in `.github/workflows/`:
+
+| Workflow | Trigger | What it does |
+|----------|---------|--------------|
+| `validate.yml` | PR, push to `main` | Lint (`npm run lint`) + test (`npm test`) + build (`npm run build`) |
+| `smoke.yml` | PR, push to `main` | Build extension, then run Playwright smoke test |
+| `codeql.yml` | PR, push to `main`, schedule | Security analysis (`analyze (javascript)`) |
+| `dependency-review.yml` | PRs targeting `main` | Scans dependency changes for known vulnerabilities |
+
+All four workflows must pass before merging into `main`. The `validate.yml` job name is `build-and-test`, which is one of the required status checks for branch protection.
+
+### Security Audits (Local)
+
+Run the full security pre-flight locally before any CWS submission:
+
+```bash
+cd extension
+npm run check:security   # runs check-manifest + check-secrets in sequence
+```
+
+| Script | Purpose |
+|--------|---------|
+| `npm run check:manifest` | Validates MV3 manifest against CWS policy (no `tabs`, no `http://`, version matches, etc.) |
+| `npm run check:secrets`  | Greps `dist/` for hardcoded secrets: JWT-looking tokens, API keys, password hints, AWS/Azure secrets |
+
+These scripts are also run in CI via `validate.yml` (manifest check) and `security-audit.yml` (secret scan).

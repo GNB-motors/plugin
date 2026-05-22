@@ -339,7 +339,7 @@ extension/
 ├── public/
 │   ├── privacy.html                    # privacy policy (host at a public HTTPS URL)
 │   └── icons/                          # 16 / 48 / 128 px
-├── scripts/                            # build-zip.cjs, upload-sourcemaps.cjs
+├── scripts/                            # build-zip.cjs, check-manifest-policy.cjs, check-secrets.cjs, upload-sourcemaps.cjs
 └── src/
     ├── main.jsx                        # popup React entry
     ├── content/
@@ -377,9 +377,15 @@ npm run build
 npm run build:zip
 
 # tests
-npm test            # vitest run
-npm run test:watch
+npm test                  # vitest run (187 tests, 2 skipped)
+npm run test:watch        # re-run on save
+npm run test:smoke        # Playwright: load dist/ into Chromium, verify popup renders
 npm run lint
+
+# security pre-flight (run before any CWS submission)
+npm run check:manifest    # CWS policy check on manifest + dist
+npm run check:secrets     # scan dist/ for hardcoded secrets
+npm run check:security    # both above + npm audit --audit-level=high
 ```
 
 **Load into Chrome:** `chrome://extensions/` → enable **Developer mode** → **Load unpacked** → pick `dist/` (production) or the project root (dev). Popup changes hot-reload; service-worker changes need the refresh icon on the extensions page.
@@ -437,4 +443,4 @@ For the deeper backend story (encryption, cron cadence, `NO_DATA`/backoff, the `
 
 ## Versioning
 
-This extension follows semantic versioning on the `0.x` line. Every release gets an entry in [`CHANGELOG.md`](./CHANGELOG.md) (`## [YYYY-MM-DD] vX.Y.Z — summary`, Keep-a-Changelog sections). `MINOR` for new capability, `PATCH` for fixes. The `manifest.json` and `package.json` versions are kept in lockstep. No `2.x` release was ever published — older "v2.0.0" references in the codebase describe an architecture milestone, not a shipped version.
+This extension follows semantic versioning on the `0.x` line. Every release gets an entry in [`CHANGELOG.md`](./CHANGELOG.md) (`## [YYYY-MM-DD] vX.Y.Z — summary`, Keep-a-Changelog sections). `MINOR` for new capability, `PATCH` for fixes. The `manifest.json` version is the **source of truth** for CWS submissions. `package.json` may drift behind (e.g. `0.0.0.1` vs manifest `0.0.0.2`) — do not bump `manifest.json` outside a CWS submission cycle. No `2.x` release was ever published — older "v2.0.0" references in the codebase describe an architecture milestone, not a shipped version.
