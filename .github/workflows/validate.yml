@@ -13,6 +13,7 @@ jobs:
         working-directory: extension
 
     steps:
+      - uses: actions/checkout@v4
       - uses: ./.github/actions/setup-extension
 
       - name: Lint
@@ -60,6 +61,7 @@ jobs:
         working-directory: extension
 
     steps:
+      - uses: actions/checkout@v4
       - uses: ./.github/actions/setup-extension
 
       - name: npm audit (high+critical only)
