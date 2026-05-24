@@ -71,5 +71,5 @@
     return originalFetch.apply(this, args);
   };
   
-  console.log('[FleetEdge Fuel Monitor] Initialized CWS-Compliant MAIN world Network Spy.');
+  // Silent init — no console output to avoid detection in MAIN world
 })();

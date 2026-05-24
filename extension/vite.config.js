@@ -15,9 +15,15 @@ export default defineConfig({
     include: ['src/**/__tests__/**/*.test.js'],
     coverage: {
       provider: 'v8',
-      reporter: ['text', 'html'],
+      reporter: ['text', 'html', 'json-summary'],
       include: ['src/background/*.js'],
       exclude: ['src/background/__tests__/**'],
+      thresholds: {
+        statements: 80,
+        branches: 70,
+        functions: 85,
+        lines: 80,
+      },
     },
   },
 });

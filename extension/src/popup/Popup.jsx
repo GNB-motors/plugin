@@ -257,7 +257,7 @@ function LoginView({ onAction, loading, error }) {
           {loading ? 'Signing in…' : 'Sign in'}
         </button>
       </form>
-      <div className="gnb-login-foot">v 0.0.0.3 · <span className="accent">secure session</span></div>
+      <div className="gnb-login-foot">v {chrome.runtime.getManifest().version} · <span className="accent">secure session</span></div>
     </div>
   );
 }
@@ -558,7 +558,7 @@ export default function Popup() {
         <div className="gnb-brand">
           <svg className="gnb-logo" viewBox="0 0 24 24" width="22" height="22" stroke="currentColor" strokeWidth="1.5" fill="none" strokeLinecap="round" strokeLinejoin="round"><rect x="2" y="3" width="14" height="14" rx="2"/><path d="M16 8l4 2v6h-4"/><circle cx="6" cy="18" r="2"/><circle cx="16" cy="18" r="2"/></svg>
           <div><div className="gnb-brand-name">gnbedge</div></div>
-          <span className="gnb-brand-version">v 0.0.0.3</span>
+          <span className="gnb-brand-version">v {chrome.runtime.getManifest().version}</span>
         </div>
         <div className="gnb-userbar">
           <div className="gnb-avatar">{(appState.user?.name || 'U').trim().charAt(0).toUpperCase()}</div>

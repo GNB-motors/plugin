@@ -1,0 +1,19 @@
+# Global fallback
+*                       @ItsDevayan
+
+# Chrome extension source
+/extension/             @ItsDevayan
+
+# Backend mock server
+/server.js              @ItsDevayan
+/fleetedge_fuel_consumption.py @ItsDevayan
+
+# CI/CD and repo automation
+/.github/workflows/     @ItsDevayan
+/.github/               @ItsDevayan
+
+# CWS-critical files (manifest, security scripts)
+/extension/manifest.json            @ItsDevayan
+/extension/scripts/check-*.cjs    @ItsDevayan
+/extension/src/background/auth.js @ItsDevayan
+/extension/src/background/backendApi.js @ItsDevayan

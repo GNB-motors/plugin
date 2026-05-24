@@ -21,12 +21,25 @@
 
 <!-- Required if Popup UI box is checked. Drag-and-drop images here. -->
 
+## Explainer
+
+<!-- In 1-2 sentences: why did you choose this approach over alternatives? What trade-offs did you make? -->
+
 ## How I tested
 
 - [ ] `npm test` passes locally (187 tests)
 - [ ] `npm run lint` passes
 - [ ] `npm run build` produces a clean `dist/`
 - [ ] Loaded `dist/` into Chrome and verified the affected flow end-to-end
+
+## Test coverage
+
+- [ ] New feature includes tests (not just the happy path)
+- [ ] Edge cases are covered (errors, timeouts, invalid input)
+- [ ] Existing tests still pass; coverage not dropped
+- [ ] No tests needed (explain why below)
+
+<!-- If you checked "No tests needed", explain why in 1 sentence -->
 
 ## CWS impact
 

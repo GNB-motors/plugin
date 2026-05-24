@@ -1,0 +1,409 @@
+# GNB Edge Plugin — Architecture Diagrams
+
+> Generated from latest source (`git: 65de906`).
+> View with: VS Code + Mermaid extension, GitHub, or https://mermaid.live
+
+---
+
+## 1. High-Level System Context
+
+```mermaid
+flowchart TB
+    subgraph User["👤 User Browser"]
+        FE["FleetEdge Tab<br/>fleetedge.home.tatamotors"]
+        EXT["GNB Edge Extension<br/>(Popup + Service Worker)"]
+    end
+
+    subgraph Chrome["🔧 Chrome APIs"]
+        STORAGE[(chrome.storage.local)]
+        ALARMS["chrome.alarms<br/>(2-min poll)"]
+        NOTIF["chrome.notifications"]
+        BADGE["chrome.action.setBadge"]
+    end
+
+    subgraph Backend["☁️ GNB Backend<br/>api.app.gnbedge.in"]
+        AUTH["/api/extension/auth"]
+        FLEET["/api/extension/fleetedge/*"]
+        TELEM["/api/extension/telemetry/ingest"]
+        CRON["FleetEdgeCronService<br/>(~4h interval)"]
+        PULL["FleetEdgePullService"]
+        FCS["FuelComparisonService"]
+        DB[("MongoDB")]
+    end
+
+    subgraph FleetEdgeAPI["🚛 FleetEdge CVP API"]
+        CVP["vehicle master /<br/>fuel consumption"]
+    end
+
+    FE -->|"login + use FleetEdge"| CVP
+    EXT -->|"POST /auth/login"| AUTH
+    EXT -->|"GET /fleetedge/status<br/>POST /fleetedge/link-token"| FLEET
+    EXT -->|"POST /telemetry/ingest"| TELEM
+    EXT <-->|"chrome.runtime.sendMessage"| Chrome
+    CRON -->|"decrypt stored JWT"| PULL
+    PULL -->|"per-account token"| CVP
+    PULL --> FCS
+    FCS --> DB
+    FLEET --> DB
+```
+
+---
+
+## 2. Extension Internal Architecture
+
+```mermaid
+flowchart TB
+    subgraph ManifestV3["manifest.json — MV3 Declarations"]
+        SW["background.service_worker:<br/>src/background/index.js"]
+        CS1["content_scripts[0]<br/>networkSpy.js (MAIN world)"]
+        CS2["content_scripts[1]<br/>fleetedgeTokenReader.js (ISOLATED world)"]
+        PERMS["permissions:<br/>storage, alarms, notifications"]
+        HOSTS["host_permissions:<br/>api.app.gnbedge.in/*"]
+        OPT_HOSTS["optional_host_permissions:<br/>fleetedge.home.tatamotors/*"]
+    end
+
+    subgraph PopupUI["Popup UI (React)"]
+        POP["Popup.jsx"]
+        POP_CSS["Popup.css"]
+    end
+
+    subgraph ServiceWorker["Service Worker"]
+        IDX["index.js<br/>Message Router + Alarm Handler"]
+        BE["backendApi.js<br/>Auth + Authenticated Fetch"]
+        FEL["fleetedgeLink.js<br/>Token Capture + Link/Unlink"]
+        TEL["telemetry.js<br/>LEMU 7-Layer Telemetry"]
+        LOG["logger.js<br/>Namespaced Logging"]
+        UTIL["utils.js<br/>Storage + JWT + Helpers"]
+        CFG["config.js<br/>Env + Constants"]
+    end
+
+    subgraph ContentScripts["Content Scripts"]
+        SPY["networkSpy.js<br/>XHR/fetch interceptor<br/>(MAIN world)"]
+        READER["fleetedgeTokenReader.js<br/>Token scanner + message handler<br/>(ISOLATED world)"]
+    end
+
+    POP -->|"chrome.runtime.sendMessage"| IDX
+    IDX --> BE
+    IDX --> FEL
+    IDX --> TEL
+    IDX --> LOG
+    BE --> UTIL
+    FEL --> BE
+    FEL --> UTIL
+    TEL --> UTIL
+    TEL --> BE
+    LOG --> UTIL
+
+    FEL -->|"chrome.tabs.sendMessage<br/>READ_FLEETEDGE_TOKEN"| READER
+    SPY -->|"window.postMessage<br/>FLEETEDGE_INTERCEPT"| READER
+    FE_TAB["FleetEdge Tab"] -->|"XHR/fetch with<br/>Authorization header"| SPY
+```
+
+---
+
+## 3. Data Flow — Linking a FleetEdge Account
+
+```mermaid
+sequenceDiagram
+    autonumber
+    actor User
+    participant FE as FleetEdge Tab
+    participant Spy as networkSpy.js<br/>(MAIN world)
+    participant Reader as fleetedgeTokenReader.js<br/>(ISOLATED world)
+    participant SW as Service Worker<br/>(fleetedgeLink.js)
+    participant BE as GNB Backend<br/>(/api/extension)
+    participant DB as MongoDB
+
+    User->>FE: Logs into FleetEdge
+    Note over Spy: Monkey-patches XHR & fetch<br/>on page load (document_start)
+    FE->>Spy: Any request with Auth: Bearer …
+    Spy->>Reader: postMessage({token, fleetId, type:'FLEETEDGE_INTERCEPT'})
+
+    User->>SW: Clicks "Connect FleetEdge"
+    SW->>SW: Check permissions for fleetedge host
+    SW->>FE: chrome.tabs.query({url: fleetedge...})
+    SW->>Reader: chrome.tabs.sendMessage(tab.id, {type:'READ_FLEETEDGE_TOKEN'})
+    Reader->>Reader: Return intercepted token (preferred)<br/>OR scan localStorage fallback
+    Reader-->>SW: {success, token, fleetId, exp, foundIn}
+
+    alt Token expires < 10 min
+        SW-->>User: Error: "Token expires in X min — refresh FleetEdge"
+    else Token valid
+        SW->>BE: POST /fleetedge/link-token<br/>{token, fleetId}
+        BE->>BE: Validate token against FleetEdge CVP
+        BE->>DB: Upsert UserFleetEdgeToken<br/>(encrypted, expiresAt, ACTIVE)
+        BE-->>SW: {accountId, vehicleCount, expiresAt}
+        SW->>BE: GET /fleetedge/status (refresh accounts)
+        BE-->>SW: {accounts, pull}
+        SW->>SW: chrome.storage.local.set({fleetEdgeAccounts})<br/>updateBadge('✓' green)
+        SW-->>User: Popup shows new account card
+    end
+```
+
+---
+
+## 4. Data Flow — Backend Pull Cycle (Extension Not Involved)
+
+```mermaid
+sequenceDiagram
+    autonumber
+    participant Cron as FleetEdgeCronService<br/>(every ~4h)
+    participant DB as MongoDB
+    participant Proxy as FleetEdgeProxyService
+    participant CVP as FleetEdge CVP API
+    participant FCS as FuelComparisonService
+    participant SW as Extension SW<br/>(statusPoll alarm)
+
+    Cron->>DB: Find ACTIVE tokens with expiresAt > now
+    loop Per account
+        Cron->>DB: Decrypt freshest token
+        Cron->>Proxy: Pull vehicle data (uses JWT)
+        alt FleetEdge 401/403
+            Proxy-->>Cron: Auth failed
+            Cron->>DB: Token.status = NEEDS_REAUTH
+            Cron->>DB: Write FLEETEDGE_REAUTH_REQUIRED UserError
+        else Success
+            Proxy->>CVP: vehicle master / fuel data
+            CVP-->>Proxy: Telemetry
+            Proxy->>FCS: Compute variance & odometer check
+            FCS->>DB: Store results<br/>(FuelComparisonTask → COMPLETED)
+        end
+    end
+    Cron->>DB: Record pull status<br/>{lastRunAt, nextRunAt, pullingNow}
+
+    Note over SW: ~2 minutes later
+    SW->>DB: GET /fleetedge/status + /status
+    DB-->>SW: {accounts, pull, metrics}
+    SW->>SW: Update popup state + badge
+```
+
+---
+
+## 5. Token Expiry & Re-Auth Loop
+
+```mermaid
+sequenceDiagram
+    autonumber
+    participant Cron as Backend Cron
+    participant DB as MongoDB
+    participant SW as Extension SW
+    actor User
+    participant FE as FleetEdge Tab
+
+    Note over DB: Predictive: expiresAt <= now<br/>Definitive: FleetEdge 401 on pull
+    Cron->>DB: Mark token NEEDS_REAUTH
+    Cron->>DB: Write FLEETEDGE_REAUTH_REQUIRED error
+
+    SW->>DB: GET /fleetedge/status (alarm poll)
+    DB-->>SW: Account.status = NEEDS_REAUTH
+    SW->>SW: Card → red "Expired"<br/>Badge → red count<br/>chrome.notifications.create
+
+    User->>FE: Opens FleetEdge, logs in
+    User->>SW: Clicks "Reconnect"
+    Note over SW: Same capture flow as link-token
+    SW->>DB: POST /fleetedge/link-token → ACTIVE
+    SW->>SW: Card → green, notification cleared
+```
+
+---
+
+## 6. Message API — Popup ↔ Service Worker
+
+```mermaid
+flowchart LR
+    subgraph Messages["chrome.runtime.sendMessage Types"]
+        AUTH["LOGIN<br/>LOGOUT<br/>GET_AUTH_STATUS"]
+        STATUS["GET_STATUS<br/>SET_BACKEND_URL"]
+        FLEET["CONNECT_FLEETEDGE<br/>DISCONNECT_FLEETEDGE<br/>RECONNECT_ACCOUNT<br/>DISCONNECT_ACCOUNT<br/>RENAME_ACCOUNT<br/>GET_FLEETEDGE_STATUS"]
+        TASK["TRIGGER_PROCESS"]
+        LOGS["GET_LOGS<br/>CLEAR_LOGS"]
+        TELEM["GET_TELEMETRY<br/>GET_TELEMETRY_STATS<br/>GET_HEALTH<br/>GET_BREADCRUMBS<br/>CLEAR_TELEMETRY<br/>FLUSH_TELEMETRY"]
+        DATA["CLEAR_ALL"]
+    end
+
+    POP["Popup.jsx"] <-->|sendMessage| SW["index.js<br/>handleMessage()"]
+    SW --> AUTH
+    SW --> STATUS
+    SW --> FLEET
+    SW --> TASK
+    SW --> LOGS
+    SW --> TELEM
+    SW --> DATA
+```
+
+---
+
+## 7. LEMU Telemetry Layers
+
+```mermaid
+flowchart TB
+    subgraph LEMU["LEMU — 7 Layer Telemetry"]
+        UI["UI Layer<br/>User interactions, popup events"]
+        MSG["MESSAGE Layer<br/>sendMessage types, handlers"]
+        BE["BACKEND Layer<br/>API calls, responses, errors"]
+        FE["FLEETEDGE Layer<br/>Token capture, link status"]
+        STOR["STORAGE Layer<br/>chrome.storage operations"]
+        TOK["TOKEN Layer<br/>JWT read, expiry checks"]
+        TASK["TASK Layer<br/>Process triggers, results"]
+    end
+
+    subgraph Buffer["In-Memory Buffer"]
+        BUF["Event Buffer<br/>(max 2000 events)"]
+    end
+
+    subgraph Storage["chrome.storage.local"]
+        SL["telemetry_events<br/>+ health_snapshot"]
+    end
+
+    subgraph BackendShip["Backend Shipment"]
+        SHIP["POST /telemetry/ingest<br/>batched 25 events<br/>every 60s<br/>WARN+ severity only"]
+    end
+
+    UI --> BUF
+    MSG --> BUF
+    BE --> BUF
+    FE --> BUF
+    STOR --> BUF
+    TOK --> BUF
+    TASK --> BUF
+
+    BUF -->|"flush every 5s"| SL
+    SL -->|"ship every 60s"| SHIP
+```
+
+---
+
+## 8. Multi-Account Data Model
+
+```mermaid
+erDiagram
+    USER["Backend User"] {
+        string _id
+        string name
+        string role "OWNER|MANAGER|SUPER_ADMIN|DRIVER"
+        string orgId
+    }
+
+    ACCOUNT["FleetEdgeAccount"] {
+        string _id
+        string orgId
+        string source "EXTENSION"
+        string externalAccountId "fleetId"
+        string friendlyName
+        string status "ACTIVE|AUTH_FAILED"
+    }
+
+    TOKEN["UserFleetEdgeToken"] {
+        string _id
+        string userId
+        string fleetEdgeAccountId
+        string encryptedToken "AES-256-GCM"
+        datetime expiresAt
+        string status "ACTIVE|NEEDS_REAUTH|REVOKED"
+    }
+
+    VEHICLE["Vehicle"] {
+        string _id
+        string registrationNumber
+        string fleetEdgeAccountId
+    }
+
+    TASK["FuelComparisonTask"] {
+        string _id
+        string vehicleId
+        string status "PENDING|IN_PROGRESS|COMPLETED|NO_DATA|FAILED"
+        datetime nextRetryAt
+    }
+
+    USER ||--o{ TOKEN : "links"
+    TOKEN }o--|| ACCOUNT : "belongs to"
+    ACCOUNT ||--o{ VEHICLE : "tags"
+    VEHICLE ||--o{ TASK : "generates"
+```
+
+---
+
+## 9. Local Test Server Architecture
+
+```mermaid
+flowchart LR
+    subgraph Local["Local Dev Environment<br/>localhost:3000"]
+        SRV["server.js<br/>Express + CORS"]
+        MEM[("In-Memory Store<br/>tasks[], results[],<br/>errors[], ingested[]")]
+    end
+
+    subgraph Extension["Extension (Dev Mode)"]
+        POP["Popup"]
+        SW["Service Worker"]
+    end
+
+    SRV --> MEM
+    SW -->|"GET /api/tasks/pending"| SRV
+    SW -->|"POST /api/tasks/:id/result"| SRV
+    SW -->|"POST /api/tasks/:id/error"| SRV
+    SW -->|"POST /api/fuel-data/ingest"| SRV
+    POP -->|"Debug: GET /debug/tasks"| SRV
+    POP -->|"Debug: GET /debug/results"| SRV
+    POP -->|"Debug: POST /debug/reset"| SRV
+```
+
+---
+
+## 10. File Dependency Graph
+
+```mermaid
+flowchart TB
+    subgraph Entry["Entry Points"]
+        MANI["manifest.json"]
+        MAIN["src/main.jsx<br/>(Popup React mount)"]
+        SW_ENTRY["src/background/index.js<br/>(Service Worker)"]
+    end
+
+    subgraph Background["Background Modules"]
+        IDX["index.js"]
+        BE["backendApi.js"]
+        FEL["fleetedgeLink.js"]
+        TEL["telemetry.js"]
+        LOG["logger.js"]
+        UTIL["utils.js"]
+        CFG["config.js"]
+    end
+
+    subgraph Content["Content Scripts"]
+        SPY["networkSpy.js"]
+        READER["fleetedgeTokenReader.js"]
+    end
+
+    subgraph UI["Popup UI"]
+        POPUP["Popup.jsx"]
+        POPCSS["Popup.css"]
+        APP["App.jsx"]
+    end
+
+    MANI --> SW_ENTRY
+    MANI --> SPY
+    MANI --> READER
+    MAIN --> APP --> POPUP
+
+    SW_ENTRY --> IDX
+    IDX --> BE
+    IDX --> FEL
+    IDX --> TEL
+    IDX --> LOG
+    BE --> UTIL
+    BE --> CFG
+    FEL --> BE
+    FEL --> UTIL
+    FEL --> TEL
+    TEL --> UTIL
+    TEL --> BE
+    TEL --> CFG
+    LOG --> UTIL
+
+    SPY -.->|"postMessage"| READER
+    FEL -.->|"tabs.sendMessage"| READER
+```
+
+---
+
+*Last updated: 2026-05-13 | Commit: 65de906*

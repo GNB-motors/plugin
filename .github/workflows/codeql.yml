@@ -4,7 +4,6 @@ on:
   push:
     branches: [Devayan, updated-design, main]
   pull_request:
-    branches: [Devayan, updated-design, main]
   schedule:
     - cron: '23 4 * * 1'  # Weekly Monday 04:23 UTC
 
@@ -20,7 +19,7 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        language: [javascript]
+        language: [javascript, python]
 
     steps:
       - uses: actions/checkout@v4
@@ -38,4 +37,3 @@ jobs:
         uses: github/codeql-action/analyze@v3
         with:
           category: '/language:${{ matrix.language }}'
-          upload: never
