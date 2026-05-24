@@ -6,7 +6,6 @@ const createdFiles = danger.git.created_files;
 const allFiles = [...modifiedFiles, ...createdFiles];
 
 const testFiles = allFiles.filter((f) => f.includes('.test.') || f.includes('__tests__'));
-const srcFiles = allFiles.filter((f) => f.startsWith('extension/src/') && !f.includes('__tests__'));
 const authFiles = allFiles.filter((f) =>
   f.includes('auth.js') || f.includes('backendApi.js') || f.includes('fleetedgeLink.js')
 );
