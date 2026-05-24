@@ -177,3 +177,20 @@ export async function getMetrics() {
   const store = await getStorage(['metrics']);
   return { ...DEFAULT_METRICS, ...store.metrics };
 }
+
+/**
+ * Derive the display status of a FleetEdge account based on its expiry.
+ * Used by both the service worker (badge logic) and the popup UI.
+ * @param {Object} account - Account object with status, expiresAt
+ * @param {number} [nowMs=Date.now()] - Current timestamp
+ * @returns {string} 'linked' | 'expiring' | 'expired'
+ */
+export function deriveAccountStatus(account, nowMs = Date.now()) {
+  if (account.status === 'NEEDS_REAUTH') return 'expired';
+  const exp = account.expiresAt ? new Date(account.expiresAt).getTime() : null;
+  if (exp == null) return 'linked';
+  const rem = (exp - nowMs) / 1000;
+  if (rem <= 0) return 'expired';
+  if (rem <= 3600) return 'expiring';
+  return 'linked';
+}

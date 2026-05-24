@@ -9,7 +9,8 @@
  */
 
 import { createLogger } from './logger.js';
-import { getStorage, setStorage, checkTokenExpiry } from './utils.js';
+import { getStorage, setStorage, checkTokenExpiry, deriveAccountStatus } from './utils.js';
+import { backendFetch } from './backendApi.js';
 import { createLayerLogger, LAYERS } from './telemetry.js';
 
 const logger = createLogger('FleetEdgeLink');
@@ -22,16 +23,6 @@ const MIN_TOKEN_TTL_SECONDS = 600; // 10 minutes
 const _notifiedExpiredAccounts = new Set();
 
 // ── helpers ───────────────────────────────────────────────────────────────────
-
-function deriveAccountStatus(account, nowMs = Date.now()) {
-  if (account.status === 'NEEDS_REAUTH') return 'expired';
-  const exp = account.expiresAt ? new Date(account.expiresAt).getTime() : null;
-  if (exp == null) return 'linked';
-  const rem = (exp - nowMs) / 1000;
-  if (rem <= 0) return 'expired';
-  if (rem <= 3600) return 'expiring';
-  return 'linked';
-}
 
 function updateBadge(accounts) {
   if (!accounts.length) {
@@ -65,7 +56,7 @@ function notifyExpiredAccounts(accounts) {
       _notifiedExpiredAccounts.add(acc.accountId);
       chrome.notifications.create(`fe-expired-${acc.accountId}`, {
         type: 'basic',
-        iconUrl: 'logo.svg',
+        iconUrl: 'icons/icon48.png',
         title: 'FleetEdge session expired',
         message: `Session for "${acc.friendlyName || acc.fleetId}" expired — open FleetEdge and reconnect.`,
       });
@@ -153,7 +144,6 @@ export async function connectFleetEdge() {
     return captured;
   }
 
-  const { backendFetch } = await import('./backendApi.js');
   try {
     const response = await backendFetch('/fleetedge/link-token', {
       method: 'POST',
@@ -196,7 +186,6 @@ export async function reconnectFleetEdgeAccount(accountId) {
  * Disconnect a specific account. Null disconnects all.
  */
 export async function disconnectFleetEdgeAccount(accountId) {
-  const { backendFetch } = await import('./backendApi.js');
   try {
     await backendFetch('/fleetedge/unlink', {
       method: 'POST',
@@ -249,7 +238,6 @@ export async function renameFleetEdgeAccount(accountId, friendlyName) {
  */
 export async function getFleetEdgeStatus() {
   try {
-    const { backendFetch } = await import('./backendApi.js');
     const response = await backendFetch('/fleetedge/status');
     const data = await response.json();
     const status = data.data || {};

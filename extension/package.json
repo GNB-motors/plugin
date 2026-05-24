@@ -15,7 +15,9 @@
     "test:smoke": "playwright test",
     "check:manifest": "node scripts/check-manifest-policy.cjs",
     "check:secrets": "node scripts/check-secrets.cjs",
-    "check:security": "npm run check:manifest && npm run check:secrets && npm audit --audit-level=high"
+    "check:security": "npm run check:manifest && npm run check:secrets && npm audit --audit-level=high",
+    "format": "biome format --write .",
+    "format:check": "biome format ."
   },
   "dependencies": {
     "react": "^19.2.0",
@@ -40,6 +42,11 @@
     "sharp": "^0.34.5",
     "vite": "^7.3.1",
     "vitest": "^3.0.0",
-    "@playwright/test": "^1.48.0"
+    "@playwright/test": "^1.48.0",
+    "@biomejs/biome": "1.9.4",
+    "@commitlint/cli": "^19.5.0",
+    "@commitlint/config-conventional": "^19.5.0",
+    "size-limit": "^11.1.0",
+    "@size-limit/file": "^11.1.0"
   }
 }

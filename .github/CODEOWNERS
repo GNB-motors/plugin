@@ -1,0 +1,19 @@
+# Global fallback
+*                       @ItsDevayan @devgupta2619 @divyanshpoddar @Amitansu-priyadarsan @sakshamk-neuradynamics @GNBMOTORS
+
+# Chrome extension source
+/extension/             @ItsDevayan @devgupta2619 @divyanshpoddar @Amitansu-priyadarsan @sakshamk-neuradynamics @GNBMOTORS
+
+# Backend mock server
+/server.js              @ItsDevayan @devgupta2619 @divyanshpoddar @Amitansu-priyadarsan @sakshamk-neuradynamics @GNBMOTORS
+/fleetedge_fuel_consumption.py @ItsDevayan @devgupta2619 @divyanshpoddar @Amitansu-priyadarsan @sakshamk-neuradynamics @GNBMOTORS
+
+# CI/CD and repo automation
+/.github/workflows/     @ItsDevayan @devgupta2619 @divyanshpoddar @Amitansu-priyadarsan @sakshamk-neuradynamics @GNBMOTORS
+/.github/               @ItsDevayan @devgupta2619 @divyanshpoddar @Amitansu-priyadarsan @sakshamk-neuradynamics @GNBMOTORS
+
+# CWS-critical files (manifest, security scripts)
+/extension/manifest.json            @ItsDevayan @devgupta2619 @divyanshpoddar @Amitansu-priyadarsan @sakshamk-neuradynamics @GNBMOTORS
+/extension/scripts/check-*.cjs    @ItsDevayan @devgupta2619 @divyanshpoddar @Amitansu-priyadarsan @sakshamk-neuradynamics @GNBMOTORS
+/extension/src/background/auth.js @ItsDevayan @devgupta2619 @divyanshpoddar @Amitansu-priyadarsan @sakshamk-neuradynamics @GNBMOTORS
+/extension/src/background/backendApi.js @ItsDevayan @devgupta2619 @divyanshpoddar @Amitansu-priyadarsan @sakshamk-neuradynamics @GNBMOTORS

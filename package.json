@@ -1,7 +1,7 @@
 {
-  "name": "fleetedge-backend-server",
+  "name": "@gnbedge/mock-backend",
   "version": "1.0.0",
-  "description": "Mock backend server for FleetEdge Fuel Monitor",
+  "description": "Local mock backend for FleetEdge Fuel Monitor development and testing. Not the production backend.",
   "main": "server.js",
   "scripts": {
     "start": "node server.js",

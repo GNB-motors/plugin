@@ -77,6 +77,11 @@ function readFleetEdgeToken() {
 }
 
 function fallbackLocalStorageScan() {
+  // Early exit: if a live token was intercepted while we were waiting, use it immediately
+  if (interceptedToken) {
+    return readFleetEdgeToken();
+  }
+
   function isJwt(str) {
     if (typeof str !== 'string') return false;
     const parts = str.split('.');

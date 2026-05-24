@@ -2,9 +2,8 @@ name: Validate
 
 on:
   pull_request:
-    branches: [Devayan, updated-design, main]
   push:
-    branches: [Devayan, updated-design, main]
+    branches: [main]
 
 jobs:
   build-and-test:
@@ -15,20 +14,16 @@ jobs:
 
     steps:
       - uses: actions/checkout@v4
-      - uses: actions/setup-node@v4
-        with:
-          node-version: '20'
-          cache: 'npm'
-          cache-dependency-path: extension/package-lock.json
-
-      - name: Install dependencies
-        run: npm ci
+      - uses: ./.github/actions/setup-extension
 
       - name: Lint
         run: npm run lint
 
-      - name: Unit + integration tests
-        run: npm test
+      - name: Check formatting
+        run: npx @biomejs/biome format .
+
+      - name: Unit + integration tests with coverage
+        run: npm run test:coverage
 
       - name: Build
         run: npm run build
@@ -37,6 +32,9 @@ jobs:
         run: |
           test -f dist/manifest.json || (echo "manifest.json missing from dist/" && exit 1)
           test -f dist/service-worker-loader.js || (echo "service worker missing from dist/" && exit 1)
+
+      - name: Check bundle size
+        run: npx size-limit
 
   cws-policy-check:
     runs-on: ubuntu-latest
@@ -64,11 +62,34 @@ jobs:
 
     steps:
       - uses: actions/checkout@v4
-      - uses: actions/setup-node@v4
-        with:
-          node-version: '20'
-          cache: 'npm'
-          cache-dependency-path: extension/package-lock.json
+      - uses: ./.github/actions/setup-extension
 
       - name: npm audit (high+critical only)
         run: npm audit --audit-level=high
+
+  trufflehog:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+      - uses: trufflesecurity/trufflehog@main
+        with:
+          path: ./
+          base: ${{ github.event.repository.default_branch }}
+          head: HEAD
+          extra_args: --only-verified
+
+  semgrep:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      security-events: write
+    steps:
+      - uses: actions/checkout@v4
+      - uses: returntocorp/semgrep-action@v1
+        with:
+          config: >-
+            p/security-audit
+            p/owasp-top-ten
+            p/javascript

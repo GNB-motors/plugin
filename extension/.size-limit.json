@@ -1,0 +1,22 @@
+[
+  {
+    "path": "dist/assets/index.html-*.js",
+    "limit": "250 KB",
+    "name": "popup bundle"
+  },
+  {
+    "path": "dist/service-worker-loader.js",
+    "limit": "5 KB",
+    "name": "service worker"
+  },
+  {
+    "path": "dist/assets/networkSpy.js-*.js",
+    "limit": "5 KB",
+    "name": "network spy"
+  },
+  {
+    "path": "dist/assets/fleetedgeTokenReader.js-*.js",
+    "limit": "5 KB",
+    "name": "token reader"
+  }
+]

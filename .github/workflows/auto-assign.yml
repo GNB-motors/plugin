@@ -1,0 +1,43 @@
+name: Auto Assign
+
+on:
+  issues:
+    types: [opened]
+  pull_request_target:
+    types: [opened]
+
+permissions:
+  issues: write
+  pull-requests: write
+
+jobs:
+  assign:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/github-script@v7
+        with:
+          script: |
+            const isPR = !!context.payload.pull_request;
+            const item = isPR ? context.payload.pull_request : context.payload.issue;
+            const number = item.number;
+            const labels = item.labels.map(l => l.name);
+
+            // ── Assign based on priority ──
+            let assignees = [];
+            if (labels.includes('priority/P0')) {
+              assignees = ['ItsDevayan']; // Always assign P0 to senior
+            } else if (labels.includes('priority/P1')) {
+              assignees = ['ItsDevayan'];
+            } else if (isPR) {
+              // PRs get CODEOWNERS treatment, but if no one assigned, assign creator
+              assignees = [item.user.login];
+            }
+
+            if (assignees.length > 0) {
+              await github.rest.issues.addAssignees({
+                owner: context.repo.owner,
+                repo: context.repo.repo,
+                issue_number: number,
+                assignees: assignees,
+              });
+            }
