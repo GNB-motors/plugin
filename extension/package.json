@@ -46,7 +46,7 @@
     "@biomejs/biome": "1.9.4",
     "@commitlint/cli": "^19.5.0",
     "@commitlint/config-conventional": "^19.5.0",
-    "size-limit": "^11.1.0",
+    "size-limit": "^12.1.0",
     "@size-limit/file": "^11.1.0"
   }
 }
