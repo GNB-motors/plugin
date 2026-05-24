@@ -57,7 +57,7 @@ jobs:
 
       - name: Label high security risk
         if: steps.high-risk.outputs.high_risk == 'true'
-        uses: actions/github-script@v7
+        uses: actions/github-script@v9
         with:
           script: |
             await github.rest.issues.addLabels({
@@ -81,7 +81,7 @@ jobs:
 
       - name: Label medium security risk
         if: steps.high-risk.outputs.high_risk != 'true' && steps.medium-risk.outputs.medium_risk == 'true'
-        uses: actions/github-script@v7
+        uses: actions/github-script@v9
         with:
           script: |
             await github.rest.issues.addLabels({
@@ -105,7 +105,7 @@ jobs:
 
       - name: Label low security risk
         if: steps.high-risk.outputs.high_risk != 'true' && steps.medium-risk.outputs.medium_risk != 'true'
-        uses: actions/github-script@v7
+        uses: actions/github-script@v9
         with:
           script: |
             await github.rest.issues.addLabels({
