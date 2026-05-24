@@ -3,6 +3,7 @@ name: Dependency Review
 on:
   pull_request:
     branches: [Devayan, updated-design, main]
+  workflow_dispatch:
 
 permissions:
   contents: read
