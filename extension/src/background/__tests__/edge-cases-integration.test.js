@@ -32,7 +32,7 @@ describe('backendApi - edge cases', () => {
           get: vi.fn((keys) => {
             const store = { authToken: 'jwt-123', backendUrl: 'http://localhost:3000' };
             const result = {};
-            (Array.isArray(keys) ? keys : [keys]).forEach(k => {
+            (Array.isArray(keys) ? keys : [keys]).forEach((k) => {
               if (k in store) result[k] = store[k];
             });
             return Promise.resolve(result);
@@ -47,45 +47,53 @@ describe('backendApi - edge cases', () => {
   }
 
   it('timedFetch rejects with descriptive message on timeout (AbortError)', async () => {
-    const mod = await setupBackendApi(vi.fn().mockImplementation((_url, opts) => {
-      return new Promise((_resolve, reject) => {
-        if (opts?.signal) {
-          opts.signal.addEventListener('abort', () => {
-            const err = new Error('The operation was aborted');
-            err.name = 'AbortError';
-            reject(err);
-          });
-        }
-      });
-    }));
+    const mod = await setupBackendApi(
+      vi.fn().mockImplementation((_url, opts) => {
+        return new Promise((_resolve, reject) => {
+          if (opts?.signal) {
+            opts.signal.addEventListener('abort', () => {
+              const err = new Error('The operation was aborted');
+              err.name = 'AbortError';
+              reject(err);
+            });
+          }
+        });
+      })
+    );
     await expect(mod.backendFetch('/status')).rejects.toThrow('timed out');
   }, 20000);
 
   it('login throws when response.json() has no data.token', async () => {
-    const mod = await setupBackendApi(vi.fn().mockResolvedValue({
-      ok: true,
-      status: 200,
-      json: () => Promise.resolve({ data: {} }),
-    }));
+    const mod = await setupBackendApi(
+      vi.fn().mockResolvedValue({
+        ok: true,
+        status: 200,
+        json: () => Promise.resolve({ data: {} }),
+      })
+    );
     await expect(mod.login('test@test.com', 'pass')).rejects.toThrow();
   });
 
   it('401 response from backendFetch clears auth state', async () => {
-    const mod = await setupBackendApi(vi.fn().mockResolvedValue({
-      ok: false,
-      status: 401,
-      json: () => Promise.resolve({ message: 'Token expired' }),
-    }));
+    const mod = await setupBackendApi(
+      vi.fn().mockResolvedValue({
+        ok: false,
+        status: 401,
+        json: () => Promise.resolve({ message: 'Token expired' }),
+      })
+    );
     await expect(mod.backendFetch('/status')).rejects.toThrow();
     expect(chrome.storage.local.remove).toHaveBeenCalledWith(['authToken', 'authUser']);
   });
 
   it('fetchVehiclesFromBackend returns empty array when data.vehicles is missing', async () => {
-    const mod = await setupBackendApi(vi.fn().mockResolvedValue({
-      ok: true,
-      status: 200,
-      json: () => Promise.resolve({ data: {} }),
-    }));
+    const mod = await setupBackendApi(
+      vi.fn().mockResolvedValue({
+        ok: true,
+        status: 200,
+        json: () => Promise.resolve({ data: {} }),
+      })
+    );
     const result = await mod.fetchVehiclesFromBackend();
     expect(result).toEqual([]);
   });
@@ -120,12 +128,15 @@ describe('fleetedgeLink - edge cases', () => {
         local: {
           get: vi.fn((keys) => {
             const result = {};
-            (Array.isArray(keys) ? keys : [keys]).forEach(k => {
+            (Array.isArray(keys) ? keys : [keys]).forEach((k) => {
               if (k in STORE) result[k] = STORE[k];
             });
             return Promise.resolve(result);
           }),
-          set: vi.fn((obj) => { Object.assign(STORE, obj); return Promise.resolve(); }),
+          set: vi.fn((obj) => {
+            Object.assign(STORE, obj);
+            return Promise.resolve();
+          }),
           remove: vi.fn(() => Promise.resolve()),
         },
       },
@@ -203,18 +214,23 @@ describe('fleetedgeLink - edge cases', () => {
         local: {
           get: vi.fn((keys) => {
             const result = {};
-            (Array.isArray(keys) ? keys : [keys]).forEach(k => {
+            (Array.isArray(keys) ? keys : [keys]).forEach((k) => {
               if (k in STORE) result[k] = STORE[k];
             });
             return Promise.resolve(result);
           }),
-          set: vi.fn((obj) => { Object.assign(STORE, obj); return Promise.resolve(); }),
+          set: vi.fn((obj) => {
+            Object.assign(STORE, obj);
+            return Promise.resolve();
+          }),
           remove: vi.fn(() => Promise.resolve()),
         },
       },
       tabs: {
         query: vi.fn(() => Promise.resolve([{ id: 42 }])),
-        sendMessage: vi.fn(() => Promise.reject(new Error('Could not establish connection. Receiving end does not exist.'))),
+        sendMessage: vi.fn(() =>
+          Promise.reject(new Error('Could not establish connection. Receiving end does not exist.'))
+        ),
         reload: vi.fn(() => Promise.resolve()),
       },
       permissions: { contains: vi.fn(() => Promise.resolve(true)) },

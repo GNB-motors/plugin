@@ -15,7 +15,9 @@ async function timedFetch(url, options = {}) {
     return await fetch(url, { ...options, signal: controller.signal });
   } catch (err) {
     if (err.name === 'AbortError') {
-      throw new Error(`Request timed out after ${timeoutMs / 1000}s: ${options.method || 'GET'} ${url}`);
+      throw new Error(
+        `Request timed out after ${timeoutMs / 1000}s: ${options.method || 'GET'} ${url}`
+      );
     }
     if (err.message === 'Failed to fetch') {
       throw new Error(`Backend unreachable (${url}). Is the server running?`);
@@ -116,7 +118,7 @@ export async function backendFetch(path, options = {}) {
     ...options,
     cache: 'no-store', // explicitly disable extension cache
     headers: {
-      'Authorization': `Bearer ${token}`,
+      Authorization: `Bearer ${token}`,
       'Content-Type': 'application/json',
       ...options.headers,
     },
@@ -132,7 +134,9 @@ export async function backendFetch(path, options = {}) {
   if (!response.ok) {
     const body = await response.json().catch(() => ({}));
     bTel.error(`Backend ${options.method || 'GET'} ${path} failed`, { status: response.status });
-    throw new Error(body.message || `Backend ${options.method || 'GET'} ${path} failed: ${response.status}`);
+    throw new Error(
+      body.message || `Backend ${options.method || 'GET'} ${path} failed: ${response.status}`
+    );
   }
 
   return response;

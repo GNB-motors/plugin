@@ -232,8 +232,12 @@ describe('buildUtcWindow — edge cases', () => {
 // ═══════════════════════════════════════════════════════════════════════════════
 
 describe('checkTokenExpiry — edge cases', () => {
-  beforeEach(() => { vi.useFakeTimers(); });
-  afterEach(() => { vi.useRealTimers(); });
+  beforeEach(() => {
+    vi.useFakeTimers();
+  });
+  afterEach(() => {
+    vi.useRealTimers();
+  });
 
   it('exp exactly at buffer boundary returns invalid', () => {
     const now = Math.floor(Date.now() / 1000);
@@ -311,11 +315,16 @@ describe('checkTokenExpiry — edge cases', () => {
 // ═══════════════════════════════════════════════════════════════════════════════
 
 describe('withRetry — edge cases', () => {
-  beforeEach(() => { vi.useFakeTimers(); });
-  afterEach(() => { vi.useRealTimers(); });
+  beforeEach(() => {
+    vi.useFakeTimers();
+  });
+  afterEach(() => {
+    vi.useRealTimers();
+  });
 
   it('succeeds on the very last attempt (attempt 3 of 3)', async () => {
-    const fn = vi.fn()
+    const fn = vi
+      .fn()
       .mockRejectedValueOnce(new Error('fail-1'))
       .mockRejectedValueOnce(new Error('fail-2'))
       .mockResolvedValue('third-time');

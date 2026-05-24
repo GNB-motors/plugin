@@ -15,14 +15,17 @@ vi.stubGlobal('chrome', {
     local: {
       get: vi.fn((keys) => {
         const result = {};
-        (Array.isArray(keys) ? keys : [keys]).forEach(k => {
+        (Array.isArray(keys) ? keys : [keys]).forEach((k) => {
           if (k in STORE) result[k] = STORE[k];
         });
         return Promise.resolve(result);
       }),
-      set: vi.fn((obj) => { Object.assign(STORE, obj); return Promise.resolve(); }),
+      set: vi.fn((obj) => {
+        Object.assign(STORE, obj);
+        return Promise.resolve();
+      }),
       remove: vi.fn((keys) => {
-        (Array.isArray(keys) ? keys : [keys]).forEach(k => delete STORE[k]);
+        (Array.isArray(keys) ? keys : [keys]).forEach((k) => delete STORE[k]);
         return Promise.resolve();
       }),
     },
@@ -37,26 +40,23 @@ vi.mock('../logger.js', () => ({
   createLogger: () => ({ info: vi.fn(), warn: vi.fn(), error: vi.fn(), debug: vi.fn() }),
 }));
 
-const {
-  login,
-  logout,
-  isAuthenticated,
-  backendFetch,
-  fetchVehiclesFromBackend,
-  fetchStatus,
-} = await import('../backendApi.js');
+const { login, logout, isAuthenticated, backendFetch, fetchVehiclesFromBackend, fetchStatus } =
+  await import('../backendApi.js');
 
 function mockFetch(status, body) {
-  vi.stubGlobal('fetch', vi.fn().mockResolvedValue({
-    ok: status >= 200 && status < 300,
-    status,
-    json: () => Promise.resolve(body),
-    text: () => Promise.resolve(JSON.stringify(body)),
-  }));
+  vi.stubGlobal(
+    'fetch',
+    vi.fn().mockResolvedValue({
+      ok: status >= 200 && status < 300,
+      status,
+      json: () => Promise.resolve(body),
+      text: () => Promise.resolve(JSON.stringify(body)),
+    })
+  );
 }
 
 beforeEach(() => {
-  Object.keys(STORE).forEach(k => delete STORE[k]);
+  Object.keys(STORE).forEach((k) => delete STORE[k]);
   vi.restoreAllMocks();
 });
 
@@ -224,11 +224,14 @@ describe('Edge Cases', () => {
 
   it('AbortError from fetch is converted to a descriptive timeout message', async () => {
     STORE.authToken = 'jwt-123';
-    vi.stubGlobal('fetch', vi.fn(() => {
-      const err = new Error('The operation was aborted');
-      err.name = 'AbortError';
-      return Promise.reject(err);
-    }));
+    vi.stubGlobal(
+      'fetch',
+      vi.fn(() => {
+        const err = new Error('The operation was aborted');
+        err.name = 'AbortError';
+        return Promise.reject(err);
+      })
+    );
     await expect(backendFetch('/test')).rejects.toThrow('timed out');
   });
 });

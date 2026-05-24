@@ -21,10 +21,7 @@ const svg = fs.readFileSync(SRC);
 (async () => {
   for (const size of [16, 48, 128]) {
     const out = path.join(OUT_DIR, `icon${size}.png`);
-    await sharp(svg, { density: 384 })
-      .resize(size, size)
-      .png()
-      .toFile(out);
+    await sharp(svg, { density: 384 }).resize(size, size).png().toFile(out);
     console.log(`✓ icon${size}.png`);
   }
 })();

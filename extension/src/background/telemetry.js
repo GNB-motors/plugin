@@ -12,19 +12,19 @@ import { getStorage, setStorage } from './utils.js';
 // ─── Constants ───────────────────────────────────────────────────────────────
 
 export const LAYERS = Object.freeze({
-  UI:        'UI',        // Popup / content interactions
-  MESSAGE:   'MESSAGE',   // chrome.runtime messaging
-  BACKEND:   'BACKEND',   // Backend HTTP calls
+  UI: 'UI', // Popup / content interactions
+  MESSAGE: 'MESSAGE', // chrome.runtime messaging
+  BACKEND: 'BACKEND', // Backend HTTP calls
   FLEETEDGE: 'FLEETEDGE', // FleetEdge connection & backend proxy status
-  STORAGE:   'STORAGE',   // chrome.storage operations
-  TOKEN:     'TOKEN',     // FleetEdge token reading (content script)
-  TASK:      'TASK',      // Backend-side task processing events
+  STORAGE: 'STORAGE', // chrome.storage operations
+  TOKEN: 'TOKEN', // FleetEdge token reading (content script)
+  TASK: 'TASK', // Backend-side task processing events
 });
 
 export const SEVERITY = Object.freeze({
   DEBUG: 0,
-  INFO:  1,
-  WARN:  2,
+  INFO: 1,
+  WARN: 2,
   ERROR: 3,
   FATAL: 4,
 });
@@ -78,8 +78,8 @@ async function collectUserEnvironment() {
   // Chrome platform info
   try {
     const platform = await chrome.runtime.getPlatformInfo();
-    env.os = platform.os;         // 'win', 'mac', 'linux', 'cros', 'android'
-    env.arch = platform.arch;     // 'arm', 'x86-32', 'x86-64', 'mips', 'mips64'
+    env.os = platform.os; // 'win', 'mac', 'linux', 'cros', 'android'
+    env.arch = platform.arch; // 'arm', 'x86-32', 'x86-64', 'mips', 'mips64'
   } catch {
     env.os = 'unknown';
     env.arch = 'unknown';
@@ -91,7 +91,7 @@ async function collectUserEnvironment() {
   // Connection info (if available)
   if (typeof navigator !== 'undefined' && navigator.connection) {
     env.connection = {
-      effectiveType: navigator.connection.effectiveType,  // '4g', '3g', etc.
+      effectiveType: navigator.connection.effectiveType, // '4g', '3g', etc.
       downlink: navigator.connection.downlink,
       rtt: navigator.connection.rtt,
       saveData: navigator.connection.saveData,
@@ -135,9 +135,9 @@ function parseBrowserFromUA(ua) {
  */
 export function computeFingerprint(layer, errorName, message) {
   const normalized = String(message || '')
-    .replace(/\d{4}-\d{2}-\d{2}T[\d:.Z]+/g, '<TS>')  // ISO timestamps (before numbers!)
-    .replace(/[0-9a-f]{8,}/gi, '<ID>')     // hex IDs
-    .replace(/\d{4,}/g, '<NUM>')            // long numbers
+    .replace(/\d{4}-\d{2}-\d{2}T[\d:.Z]+/g, '<TS>') // ISO timestamps (before numbers!)
+    .replace(/[0-9a-f]{8,}/gi, '<ID>') // hex IDs
+    .replace(/\d{4,}/g, '<NUM>') // long numbers
     .replace(/https?:\/\/[^\s]+/g, '<URL>') // URLs
     .trim()
     .slice(0, 200);
@@ -173,7 +173,7 @@ function buildEvent(layer, severity, message, extra = {}) {
     event.errorName = err.name;
     event.stack = err.stack?.slice(0, 4000) || '';
     event.fingerprint = computeFingerprint(layer, err.name, message);
-    delete event.error;  // Don't store raw error object
+    delete event.error; // Don't store raw error object
   } else if (severityLevel >= SEVERITY.WARN) {
     event.fingerprint = computeFingerprint(layer, 'Warning', message);
   }
@@ -281,12 +281,12 @@ export function record(layer, severity, message, extra = {}) {
 export function createLayerLogger(layer) {
   return {
     debug: (msg, extra) => record(layer, 'DEBUG', msg, extra),
-    info:  (msg, extra) => record(layer, 'INFO', msg, extra),
-    warn:  (msg, extra) => record(layer, 'WARN', msg, extra),
+    info: (msg, extra) => record(layer, 'INFO', msg, extra),
+    warn: (msg, extra) => record(layer, 'WARN', msg, extra),
     error: (msg, extra) => record(layer, 'ERROR', msg, extra),
     fatal: (msg, extra) => record(layer, 'FATAL', msg, extra),
     perfStart: (label) => perfStart(label),
-    perfEnd:   (label) => perfEnd(label, layer),
+    perfEnd: (label) => perfEnd(label, layer),
   };
 }
 
@@ -364,7 +364,7 @@ async function shipToBackend() {
       const res = await fetch(url, {
         method: 'POST',
         headers: {
-          'Authorization': `Bearer ${token}`,
+          Authorization: `Bearer ${token}`,
           'Content-Type': 'application/json',
         },
         body: JSON.stringify({
@@ -389,7 +389,11 @@ async function shipToBackend() {
   }
 
   // Persist queue in case service worker restarts
-  try { await setStorage({ [SHIP_QUEUE_KEY]: shipQueue.slice(0, 200) }); } catch { /* persist non-critical */ }
+  try {
+    await setStorage({ [SHIP_QUEUE_KEY]: shipQueue.slice(0, 200) });
+  } catch {
+    /* persist non-critical */
+  }
 
   if (shipQueue.length > 0) scheduleShip();
 }
@@ -397,15 +401,17 @@ async function shipToBackend() {
 // ─── Query / Export Functions ────────────────────────────────────────────────
 
 export async function getEvents(filters = {}) {
-  await flush();  // Ensure buffer is written
+  await flush(); // Ensure buffer is written
   const store = await getStorage([STORAGE_KEY]);
   let events = store[STORAGE_KEY] || [];
 
-  if (filters.layer)    events = events.filter(e => e.layer === filters.layer);
-  if (filters.severity) events = events.filter(e => e.severityLevel >= SEVERITY[filters.severity]);
-  if (filters.since)    events = events.filter(e => e.ts >= filters.since);
-  if (filters.search)   events = events.filter(e => e.message.toLowerCase().includes(filters.search.toLowerCase()));
-  if (filters.limit)    events = events.slice(-filters.limit);
+  if (filters.layer) events = events.filter((e) => e.layer === filters.layer);
+  if (filters.severity)
+    events = events.filter((e) => e.severityLevel >= SEVERITY[filters.severity]);
+  if (filters.since) events = events.filter((e) => e.ts >= filters.since);
+  if (filters.search)
+    events = events.filter((e) => e.message.toLowerCase().includes(filters.search.toLowerCase()));
+  if (filters.limit) events = events.slice(-filters.limit);
 
   return events;
 }
@@ -465,7 +471,9 @@ export async function startTelemetry() {
   try {
     const store = await getStorage([SHIP_QUEUE_KEY]);
     shipQueue = store[SHIP_QUEUE_KEY] || [];
-  } catch { /* storage read non-critical */ }
+  } catch {
+    /* storage read non-critical */
+  }
 
   // Start shipping timer
   if (config.TELEMETRY_SHIP_TO_BACKEND) {
@@ -481,10 +489,18 @@ export async function startTelemetry() {
 // ─── Exports for testing ─────────────────────────────────────────────────────
 
 export const _internals = {
-  get eventBuffer() { return eventBuffer; },
-  get shipQueue() { return shipQueue; },
-  get breadcrumbs() { return breadcrumbs; },
-  get healthCounters() { return healthCounters; },
+  get eventBuffer() {
+    return eventBuffer;
+  },
+  get shipQueue() {
+    return shipQueue;
+  },
+  get breadcrumbs() {
+    return breadcrumbs;
+  },
+  get healthCounters() {
+    return healthCounters;
+  },
   flush,
   shipToBackend,
   collectUserEnvironment,

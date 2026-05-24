@@ -50,7 +50,15 @@ describe('backendApi — v2 improvements', () => {
           perfEnd: vi.fn(),
         };
       },
-      LAYERS: { UI: 'UI', MESSAGE: 'MESSAGE', BACKEND: 'BACKEND', FLEETEDGE: 'FLEETEDGE', STORAGE: 'STORAGE', TOKEN: 'TOKEN', TASK: 'TASK' },
+      LAYERS: {
+        UI: 'UI',
+        MESSAGE: 'MESSAGE',
+        BACKEND: 'BACKEND',
+        FLEETEDGE: 'FLEETEDGE',
+        STORAGE: 'STORAGE',
+        TOKEN: 'TOKEN',
+        TASK: 'TASK',
+      },
     }));
 
     const store = { authToken: 'jwt-test', backendUrl: 'http://localhost:3000' };
@@ -59,7 +67,7 @@ describe('backendApi — v2 improvements', () => {
         local: {
           get: vi.fn((keys) => {
             const result = {};
-            (Array.isArray(keys) ? keys : [keys]).forEach(k => {
+            (Array.isArray(keys) ? keys : [keys]).forEach((k) => {
               if (k in store) result[k] = store[k];
             });
             return Promise.resolve(result);
@@ -101,14 +109,16 @@ describe('backendApi — v2 improvements', () => {
   it('login records BACKEND telemetry on success', async () => {
     const { mod, telemetryCalls } = await setupBackendApi({
       fetchMock: vi.fn().mockResolvedValue({
-        ok: true, status: 200,
-        json: () => Promise.resolve({ data: { token: 'jwt-new', user: { name: 'T', role: 'OWNER' } } }),
+        ok: true,
+        status: 200,
+        json: () =>
+          Promise.resolve({ data: { token: 'jwt-new', user: { name: 'T', role: 'OWNER' } } }),
       }),
     });
 
     await mod.login('user@test.com', 'pass');
 
-    const loginEvent = telemetryCalls.find(e => e.msg === 'Login successful');
+    const loginEvent = telemetryCalls.find((e) => e.msg === 'Login successful');
     expect(loginEvent).toBeDefined();
     expect(loginEvent.layer).toBe('BACKEND');
     expect(loginEvent.extra).toMatchObject({ user: 'T', role: 'OWNER' });
@@ -117,13 +127,14 @@ describe('backendApi — v2 improvements', () => {
   it('login records BACKEND telemetry on failure', async () => {
     const { mod, telemetryCalls } = await setupBackendApi({
       fetchMock: vi.fn().mockResolvedValue({
-        ok: false, status: 401,
+        ok: false,
+        status: 401,
         json: () => Promise.resolve({ message: 'Invalid' }),
       }),
     });
 
     await expect(mod.login('bad', 'bad')).rejects.toThrow();
-    const failEvent = telemetryCalls.find(e => e.msg === 'Login failed');
+    const failEvent = telemetryCalls.find((e) => e.msg === 'Login failed');
     expect(failEvent).toBeDefined();
     expect(failEvent.extra.status).toBe(401);
   });
@@ -131,36 +142,40 @@ describe('backendApi — v2 improvements', () => {
   it('401 response records BACKEND telemetry with path', async () => {
     const { mod, telemetryCalls } = await setupBackendApi({
       fetchMock: vi.fn().mockResolvedValue({
-        ok: false, status: 401,
+        ok: false,
+        status: 401,
         json: () => Promise.resolve({ message: 'expired' }),
       }),
     });
 
     await expect(mod.backendFetch('/fleetedge/status')).rejects.toThrow();
-    const warnEvent = telemetryCalls.find(e => e.msg.includes('401'));
+    const warnEvent = telemetryCalls.find((e) => e.msg.includes('401'));
     expect(warnEvent).toBeDefined();
     expect(warnEvent.extra.path).toBe('/fleetedge/status');
   });
 
   it('logout records BACKEND telemetry', async () => {
     const { mod, telemetryCalls } = await setupBackendApi({
-      fetchMock: vi.fn().mockResolvedValue({ ok: true, status: 200, json: () => Promise.resolve({}) }),
+      fetchMock: vi
+        .fn()
+        .mockResolvedValue({ ok: true, status: 200, json: () => Promise.resolve({}) }),
     });
 
     await mod.logout();
-    expect(telemetryCalls.some(e => e.msg === 'Logged out')).toBe(true);
+    expect(telemetryCalls.some((e) => e.msg === 'Logged out')).toBe(true);
   });
 
   it('non-OK response records BACKEND error telemetry', async () => {
     const { mod, telemetryCalls } = await setupBackendApi({
       fetchMock: vi.fn().mockResolvedValue({
-        ok: false, status: 500,
+        ok: false,
+        status: 500,
         json: () => Promise.resolve({ message: 'Internal' }),
       }),
     });
 
     await expect(mod.backendFetch('/test')).rejects.toThrow();
-    const errEvent = telemetryCalls.find(e => e.sev === 'ERROR' && e.extra?.status === 500);
+    const errEvent = telemetryCalls.find((e) => e.sev === 'ERROR' && e.extra?.status === 500);
     expect(errEvent).toBeDefined();
   });
 });
@@ -184,16 +199,23 @@ describe('fleetedgeLink — v2 improvements', () => {
           local: {
             get: vi.fn((keys) => {
               const result = {};
-              (Array.isArray(keys) ? keys : [keys]).forEach(k => {
+              (Array.isArray(keys) ? keys : [keys]).forEach((k) => {
                 if (k in store) result[k] = store[k];
               });
               return Promise.resolve(result);
             }),
-            set: vi.fn((obj) => { Object.assign(store, obj); return Promise.resolve(); }),
+            set: vi.fn((obj) => {
+              Object.assign(store, obj);
+              return Promise.resolve();
+            }),
             remove: vi.fn(() => Promise.resolve()),
           },
         },
-        tabs: { query: vi.fn(() => Promise.resolve([])), sendMessage: vi.fn(), reload: vi.fn(() => Promise.resolve()) },
+        tabs: {
+          query: vi.fn(() => Promise.resolve([])),
+          sendMessage: vi.fn(),
+          reload: vi.fn(() => Promise.resolve()),
+        },
         permissions: { contains: vi.fn(() => Promise.resolve(true)) },
         action: { setBadgeText: vi.fn(), setBadgeBackgroundColor: vi.fn() },
         notifications: { create: vi.fn() },
@@ -202,12 +224,18 @@ describe('fleetedgeLink — v2 improvements', () => {
   }
 
   async function setupFleetedgeLink(opts = {}) {
-    const { tabsResult = [], sendMessageResult = null, backendFetchResult = null, throwOnBackendFetch = null } = opts;
+    const {
+      tabsResult = [],
+      sendMessageResult = null,
+      backendFetchResult = null,
+      throwOnBackendFetch = null,
+    } = opts;
     const { store, chromeMock } = makeStore();
     chromeMock.tabs.query = vi.fn(() => Promise.resolve(tabsResult));
-    chromeMock.tabs.sendMessage = sendMessageResult instanceof Error
-      ? vi.fn(() => Promise.reject(sendMessageResult))
-      : vi.fn(() => Promise.resolve(sendMessageResult));
+    chromeMock.tabs.sendMessage =
+      sendMessageResult instanceof Error
+        ? vi.fn(() => Promise.reject(sendMessageResult))
+        : vi.fn(() => Promise.resolve(sendMessageResult));
     vi.stubGlobal('chrome', chromeMock);
 
     vi.doMock('../logger.js', () => ({
@@ -231,13 +259,22 @@ describe('fleetedgeLink — v2 improvements', () => {
           perfEnd: vi.fn(),
         };
       },
-      LAYERS: { UI: 'UI', MESSAGE: 'MESSAGE', BACKEND: 'BACKEND', FLEETEDGE: 'FLEETEDGE', STORAGE: 'STORAGE', TOKEN: 'TOKEN', TASK: 'TASK' },
+      LAYERS: {
+        UI: 'UI',
+        MESSAGE: 'MESSAGE',
+        BACKEND: 'BACKEND',
+        FLEETEDGE: 'FLEETEDGE',
+        STORAGE: 'STORAGE',
+        TOKEN: 'TOKEN',
+        TASK: 'TASK',
+      },
     }));
 
     const backendFetchMock = vi.fn(() => {
       if (throwOnBackendFetch) return Promise.reject(throwOnBackendFetch);
       return Promise.resolve({
-        json: () => Promise.resolve(backendFetchResult || { data: { success: true, vehicleCount: 0 } }),
+        json: () =>
+          Promise.resolve(backendFetchResult || { data: { success: true, vehicleCount: 0 } }),
       });
     });
     vi.doMock('../backendApi.js', () => ({
@@ -296,7 +333,7 @@ describe('fleetedgeLink — v2 improvements', () => {
     expect(result.error).toContain('expires in');
 
     // Should record TOKEN telemetry
-    const ttlWarn = telemetryCalls.find(e => e.layer === 'TOKEN' && e.msg.includes('expiry'));
+    const ttlWarn = telemetryCalls.find((e) => e.layer === 'TOKEN' && e.msg.includes('expiry'));
     expect(ttlWarn).toBeDefined();
   });
 
@@ -343,14 +380,20 @@ describe('fleetedgeLink — v2 improvements', () => {
     const { mod, telemetryCalls } = await setupFleetedgeLink({
       tabsResult: [{ id: 42 }],
       sendMessageResult: {
-        success: true, token: 'jwt', fleetId: 'F1', exp: safeExpiry, foundIn: 'sessionStorage',
+        success: true,
+        token: 'jwt',
+        fleetId: 'F1',
+        exp: safeExpiry,
+        foundIn: 'sessionStorage',
       },
       backendFetchResult: { data: { vehicleCount: 5 } },
     });
 
     await mod.connectFleetEdge();
 
-    const tokenRead = telemetryCalls.find(e => e.layer === 'TOKEN' && e.msg === 'Token read from content script');
+    const tokenRead = telemetryCalls.find(
+      (e) => e.layer === 'TOKEN' && e.msg === 'Token read from content script'
+    );
     expect(tokenRead).toBeDefined();
     expect(tokenRead.extra.foundIn).toBe('sessionStorage');
   });
@@ -359,7 +402,9 @@ describe('fleetedgeLink — v2 improvements', () => {
     const { mod, telemetryCalls } = await setupFleetedgeLink({ tabsResult: [] });
     await mod.connectFleetEdge();
 
-    expect(telemetryCalls.some(e => e.layer === 'TOKEN' && e.msg === 'No FleetEdge tab found')).toBe(true);
+    expect(
+      telemetryCalls.some((e) => e.layer === 'TOKEN' && e.msg === 'No FleetEdge tab found')
+    ).toBe(true);
   });
 
   it('records TOKEN.ERROR on content script communication failure', async () => {
@@ -370,7 +415,7 @@ describe('fleetedgeLink — v2 improvements', () => {
 
     await mod.connectFleetEdge();
 
-    const err = telemetryCalls.find(e => e.layer === 'TOKEN' && e.sev === 'ERROR');
+    const err = telemetryCalls.find((e) => e.layer === 'TOKEN' && e.sev === 'ERROR');
     expect(err).toBeDefined();
     expect(err.extra.reason).toContain('Receiving end');
   });
@@ -381,13 +426,21 @@ describe('fleetedgeLink — v2 improvements', () => {
     const safeExpiry = Math.floor(Date.now() / 1000) + 7200;
     const { mod, telemetryCalls } = await setupFleetedgeLink({
       tabsResult: [{ id: 42 }],
-      sendMessageResult: { success: true, token: 'jwt', fleetId: 'F1', exp: safeExpiry, foundIn: 'ls' },
+      sendMessageResult: {
+        success: true,
+        token: 'jwt',
+        fleetId: 'F1',
+        exp: safeExpiry,
+        foundIn: 'ls',
+      },
       backendFetchResult: { data: { vehicleCount: 15, expiresAt: safeExpiry } },
     });
 
     await mod.connectFleetEdge();
 
-    const linked = telemetryCalls.find(e => e.layer === 'FLEETEDGE' && e.msg === 'FleetEdge linked');
+    const linked = telemetryCalls.find(
+      (e) => e.layer === 'FLEETEDGE' && e.msg === 'FleetEdge linked'
+    );
     expect(linked).toBeDefined();
     expect(linked.extra.vehicleCount).toBe(15);
   });
@@ -396,14 +449,20 @@ describe('fleetedgeLink — v2 improvements', () => {
     const safeExpiry = Math.floor(Date.now() / 1000) + 7200;
     const { mod, telemetryCalls } = await setupFleetedgeLink({
       tabsResult: [{ id: 42 }],
-      sendMessageResult: { success: true, token: 'jwt', fleetId: 'F1', exp: safeExpiry, foundIn: 'ls' },
+      sendMessageResult: {
+        success: true,
+        token: 'jwt',
+        fleetId: 'F1',
+        exp: safeExpiry,
+        foundIn: 'ls',
+      },
       throwOnBackendFetch: new Error('Server rejected token'),
     });
 
     const result = await mod.connectFleetEdge();
     expect(result.success).toBe(false);
 
-    const errTel = telemetryCalls.find(e => e.layer === 'FLEETEDGE' && e.sev === 'ERROR');
+    const errTel = telemetryCalls.find((e) => e.layer === 'FLEETEDGE' && e.sev === 'ERROR');
     expect(errTel).toBeDefined();
     expect(errTel.msg).toContain('Link token to backend failed');
   });
@@ -412,7 +471,9 @@ describe('fleetedgeLink — v2 improvements', () => {
     const { mod, telemetryCalls } = await setupFleetedgeLink();
     await mod.disconnectFleetEdge();
 
-    expect(telemetryCalls.some(e => e.layer === 'FLEETEDGE' && e.msg === 'FleetEdge disconnected')).toBe(true);
+    expect(
+      telemetryCalls.some((e) => e.layer === 'FLEETEDGE' && e.msg === 'FleetEdge disconnected')
+    ).toBe(true);
   });
 
   it('getFleetEdgeStatus records FLEETEDGE.DEBUG on success', async () => {
@@ -434,26 +495,46 @@ describe('fleetedgeLink — v2 improvements', () => {
       createLayerLogger: (layer) => {
         const makeMethod = (sev) => (msg, extra) => telemetryCalls.push({ layer, sev, msg, extra });
         return {
-          debug: makeMethod('DEBUG'), info: makeMethod('INFO'), warn: makeMethod('WARN'),
-          error: makeMethod('ERROR'), fatal: makeMethod('FATAL'), perfStart: vi.fn(), perfEnd: vi.fn(),
+          debug: makeMethod('DEBUG'),
+          info: makeMethod('INFO'),
+          warn: makeMethod('WARN'),
+          error: makeMethod('ERROR'),
+          fatal: makeMethod('FATAL'),
+          perfStart: vi.fn(),
+          perfEnd: vi.fn(),
         };
       },
       LAYERS: { FLEETEDGE: 'FLEETEDGE', TOKEN: 'TOKEN' },
     }));
 
     vi.doMock('../backendApi.js', () => ({
-      backendFetch: vi.fn(() => Promise.resolve({
-        json: () => Promise.resolve({
-          data: { accounts: [{ accountId: 'a1', status: 'ACTIVE', fleetId: 'F1', expiresAt: new Date(Date.now() + 3600_000).toISOString() }], pull: {} },
-        }),
-      })),
+      backendFetch: vi.fn(() =>
+        Promise.resolve({
+          json: () =>
+            Promise.resolve({
+              data: {
+                accounts: [
+                  {
+                    accountId: 'a1',
+                    status: 'ACTIVE',
+                    fleetId: 'F1',
+                    expiresAt: new Date(Date.now() + 3600_000).toISOString(),
+                  },
+                ],
+                pull: {},
+              },
+            }),
+        })
+      ),
     }));
 
     const mod = await import('../fleetedgeLink.js');
     const status = await mod.getFleetEdgeStatus();
     expect(status.accounts[0].fleetId).toBe('F1');
 
-    const debugEvt = telemetryCalls.find(e => e.layer === 'FLEETEDGE' && e.msg === 'FleetEdge status fetched');
+    const debugEvt = telemetryCalls.find(
+      (e) => e.layer === 'FLEETEDGE' && e.msg === 'FleetEdge status fetched'
+    );
     expect(debugEvt).toBeDefined();
   });
 
@@ -476,29 +557,46 @@ describe('fleetedgeLink — v2 improvements', () => {
       createLayerLogger: (layer) => {
         const makeMethod = (sev) => (msg, extra) => telemetryCalls.push({ layer, sev, msg, extra });
         return {
-          debug: makeMethod('DEBUG'), info: makeMethod('INFO'), warn: makeMethod('WARN'),
-          error: makeMethod('ERROR'), fatal: makeMethod('FATAL'), perfStart: vi.fn(), perfEnd: vi.fn(),
+          debug: makeMethod('DEBUG'),
+          info: makeMethod('INFO'),
+          warn: makeMethod('WARN'),
+          error: makeMethod('ERROR'),
+          fatal: makeMethod('FATAL'),
+          perfStart: vi.fn(),
+          perfEnd: vi.fn(),
         };
       },
       LAYERS: { FLEETEDGE: 'FLEETEDGE', TOKEN: 'TOKEN' },
     }));
 
     vi.doMock('../backendApi.js', () => ({
-      backendFetch: vi.fn(() => Promise.resolve({
-        json: () => Promise.resolve({
-          data: {
-            accounts: [{ accountId: 'a1', status: 'NEEDS_REAUTH', fleetId: 'F1', expiresAt: new Date(Date.now() - 3600_000).toISOString() }],
-            pull: {},
-          },
-        }),
-      })),
+      backendFetch: vi.fn(() =>
+        Promise.resolve({
+          json: () =>
+            Promise.resolve({
+              data: {
+                accounts: [
+                  {
+                    accountId: 'a1',
+                    status: 'NEEDS_REAUTH',
+                    fleetId: 'F1',
+                    expiresAt: new Date(Date.now() - 3600_000).toISOString(),
+                  },
+                ],
+                pull: {},
+              },
+            }),
+        })
+      ),
     }));
 
     const mod = await import('../fleetedgeLink.js');
     const status = await mod.getFleetEdgeStatus();
     expect(status.accounts[0].status).toBe('NEEDS_REAUTH');
 
-    const debugEvt = telemetryCalls.find(e => e.layer === 'FLEETEDGE' && e.msg === 'FleetEdge status fetched');
+    const debugEvt = telemetryCalls.find(
+      (e) => e.layer === 'FLEETEDGE' && e.msg === 'FleetEdge status fetched'
+    );
     expect(debugEvt).toBeDefined();
     // badge should show expired count (1 expired account)
     expect(chromeMock.action.setBadgeText).toHaveBeenCalledWith({ text: '1' });
@@ -509,7 +607,14 @@ describe('fleetedgeLink — v2 improvements', () => {
     vi.resetModules();
 
     const { store, chromeMock } = makeStore();
-    store.fleetEdgeAccounts = [{ accountId: 'a1', status: 'ACTIVE', fleetId: 'cached-fleet', expiresAt: new Date(Date.now() + 3600_000).toISOString() }];
+    store.fleetEdgeAccounts = [
+      {
+        accountId: 'a1',
+        status: 'ACTIVE',
+        fleetId: 'cached-fleet',
+        expiresAt: new Date(Date.now() + 3600_000).toISOString(),
+      },
+    ];
     store.fleetEdgePull = {};
     vi.stubGlobal('chrome', chromeMock);
 
@@ -525,8 +630,13 @@ describe('fleetedgeLink — v2 improvements', () => {
       createLayerLogger: (layer) => {
         const makeMethod = (sev) => (msg, extra) => telemetryCalls.push({ layer, sev, msg, extra });
         return {
-          debug: makeMethod('DEBUG'), info: makeMethod('INFO'), warn: makeMethod('WARN'),
-          error: makeMethod('ERROR'), fatal: makeMethod('FATAL'), perfStart: vi.fn(), perfEnd: vi.fn(),
+          debug: makeMethod('DEBUG'),
+          info: makeMethod('INFO'),
+          warn: makeMethod('WARN'),
+          error: makeMethod('ERROR'),
+          fatal: makeMethod('FATAL'),
+          perfStart: vi.fn(),
+          perfEnd: vi.fn(),
         };
       },
       LAYERS: { FLEETEDGE: 'FLEETEDGE', TOKEN: 'TOKEN' },
@@ -542,7 +652,7 @@ describe('fleetedgeLink — v2 improvements', () => {
     expect(status.accounts[0].fleetId).toBe('cached-fleet');
     expect(status.accounts[0].status).toBe('ACTIVE');
 
-    const warnEvt = telemetryCalls.find(e => e.msg.includes('Status check failed'));
+    const warnEvt = telemetryCalls.find((e) => e.msg.includes('Status check failed'));
     expect(warnEvt).toBeDefined();
   });
 
@@ -565,8 +675,13 @@ describe('fleetedgeLink — v2 improvements', () => {
       createLayerLogger: (layer) => {
         const makeMethod = (sev) => (msg, extra) => telemetryCalls.push({ layer, sev, msg, extra });
         return {
-          debug: makeMethod('DEBUG'), info: makeMethod('INFO'), warn: makeMethod('WARN'),
-          error: makeMethod('ERROR'), fatal: makeMethod('FATAL'), perfStart: vi.fn(), perfEnd: vi.fn(),
+          debug: makeMethod('DEBUG'),
+          info: makeMethod('INFO'),
+          warn: makeMethod('WARN'),
+          error: makeMethod('ERROR'),
+          fatal: makeMethod('FATAL'),
+          perfStart: vi.fn(),
+          perfEnd: vi.fn(),
         };
       },
       LAYERS: { FLEETEDGE: 'FLEETEDGE', TOKEN: 'TOKEN' },
@@ -583,12 +698,12 @@ describe('fleetedgeLink — v2 improvements', () => {
     expect(result.success).toBe(true);
 
     // But should record the API failure as a warning
-    const warnEvt = telemetryCalls.find(e => e.msg === 'Unlink API call failed');
+    const warnEvt = telemetryCalls.find((e) => e.msg === 'Unlink API call failed');
     expect(warnEvt).toBeDefined();
     expect(warnEvt.extra.error).toBe('Server 500');
 
     // And also record the disconnect
-    expect(telemetryCalls.some(e => e.msg === 'FleetEdge disconnected')).toBe(true);
+    expect(telemetryCalls.some((e) => e.msg === 'FleetEdge disconnected')).toBe(true);
   });
 });
 
@@ -611,7 +726,17 @@ describe('index.js — v2 improvements (handleMessage logic)', () => {
     const {
       store = {},
       loginResult = { token: 'jwt', user: { name: 'T', role: 'OWNER' } },
-      feStatusResult = { accounts: [{ accountId: 'a1', status: 'ACTIVE', fleetId: 'F1', expiresAt: new Date(Date.now() + 3600_000).toISOString() }], pull: { lastRunAt: null, nextRunAt: null } },
+      feStatusResult = {
+        accounts: [
+          {
+            accountId: 'a1',
+            status: 'ACTIVE',
+            fleetId: 'F1',
+            expiresAt: new Date(Date.now() + 3600_000).toISOString(),
+          },
+        ],
+        pull: { lastRunAt: null, nextRunAt: null },
+      },
       fetchStatusResult = { data: { pending: 5, completed: 10 } },
       connectResult = { success: true, vehicleCount: 15 },
       disconnectResult = { success: true },
@@ -625,14 +750,17 @@ describe('index.js — v2 improvements (handleMessage logic)', () => {
         local: {
           get: vi.fn((keys) => {
             const result = {};
-            (Array.isArray(keys) ? keys : [keys]).forEach(k => {
+            (Array.isArray(keys) ? keys : [keys]).forEach((k) => {
               if (k in STORE) result[k] = STORE[k];
             });
             return Promise.resolve(result);
           }),
-          set: vi.fn((obj) => { Object.assign(STORE, obj); return Promise.resolve(); }),
+          set: vi.fn((obj) => {
+            Object.assign(STORE, obj);
+            return Promise.resolve();
+          }),
           remove: vi.fn((keys) => {
-            (Array.isArray(keys) ? keys : [keys]).forEach(k => delete STORE[k]);
+            (Array.isArray(keys) ? keys : [keys]).forEach((k) => delete STORE[k]);
             return Promise.resolve();
           }),
         },
@@ -686,9 +814,12 @@ describe('index.js — v2 improvements (handleMessage logic)', () => {
     const loginSpy = vi.fn(() => Promise.resolve(loginResult));
     const logoutSpy = vi.fn(() => Promise.resolve());
     const isAuthenticatedSpy = vi.fn(() => Promise.resolve(!!STORE.authToken));
-    const backendFetchSpy = vi.fn(() => Promise.resolve({
-      ok: true, json: () => Promise.resolve({ data: fetchStatusResult.data }),
-    }));
+    const backendFetchSpy = vi.fn(() =>
+      Promise.resolve({
+        ok: true,
+        json: () => Promise.resolve({ data: fetchStatusResult.data }),
+      })
+    );
     const fetchStatusSpy = vi.fn(() => Promise.resolve(fetchStatusResult));
 
     vi.doMock('../backendApi.js', () => ({
@@ -703,14 +834,26 @@ describe('index.js — v2 improvements (handleMessage logic)', () => {
     vi.doMock('../telemetry.js', () => {
       const makeMethod = () => vi.fn();
       const createLayerLogger = () => ({
-        debug: makeMethod('DEBUG'), info: makeMethod('INFO'), warn: makeMethod('WARN'),
-        error: makeMethod('ERROR'), fatal: makeMethod('FATAL'),
-        perfStart: vi.fn(), perfEnd: vi.fn(),
+        debug: makeMethod('DEBUG'),
+        info: makeMethod('INFO'),
+        warn: makeMethod('WARN'),
+        error: makeMethod('ERROR'),
+        fatal: makeMethod('FATAL'),
+        perfStart: vi.fn(),
+        perfEnd: vi.fn(),
       });
       return {
         startTelemetry: vi.fn(),
         record: vi.fn(),
-        LAYERS: { UI: 'UI', MESSAGE: 'MESSAGE', BACKEND: 'BACKEND', FLEETEDGE: 'FLEETEDGE', STORAGE: 'STORAGE', TOKEN: 'TOKEN', TASK: 'TASK' },
+        LAYERS: {
+          UI: 'UI',
+          MESSAGE: 'MESSAGE',
+          BACKEND: 'BACKEND',
+          FLEETEDGE: 'FLEETEDGE',
+          STORAGE: 'STORAGE',
+          TOKEN: 'TOKEN',
+          TASK: 'TASK',
+        },
         SEVERITY: { DEBUG: 0, INFO: 1, WARN: 2, ERROR: 3, FATAL: 4 },
         createLayerLogger,
         getEvents: vi.fn(() => Promise.resolve([])),
@@ -743,7 +886,8 @@ describe('index.js — v2 improvements (handleMessage logic)', () => {
       sendMessage,
       STORE,
       spies: {
-        login: loginSpy, logout: logoutSpy,
+        login: loginSpy,
+        logout: logoutSpy,
         isAuthenticated: isAuthenticatedSpy,
         backendFetch: backendFetchSpy,
         fetchStatus: fetchStatusSpy,
@@ -802,7 +946,14 @@ describe('index.js — v2 improvements (handleMessage logic)', () => {
     // Now seed the store and make the FE status spy reject lazily
     Object.assign(STORE, {
       authToken: 'jwt-123',
-      fleetEdgeAccounts: [{ accountId: 'a1', status: 'ACTIVE', fleetId: 'cached-fleet', expiresAt: new Date(Date.now() + 3600_000).toISOString() }],
+      fleetEdgeAccounts: [
+        {
+          accountId: 'a1',
+          status: 'ACTIVE',
+          fleetId: 'cached-fleet',
+          expiresAt: new Date(Date.now() + 3600_000).toISOString(),
+        },
+      ],
       fleetEdgePull: {},
     });
     spies.getFleetEdgeStatus.mockImplementation(() => Promise.reject(new Error('Network down')));

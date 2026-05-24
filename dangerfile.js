@@ -72,7 +72,7 @@ if (codeAdditions > 500) {
 // ─── Rule 7: console.log / debugger check ─────────────────────────────────────
 const logFiles = allFiles.filter((f) => {
   const diff = danger.git.diffForFile(f);
-  if (!diff) return false;
+  if (!diff || !diff.added) return false;
   return diff.added.includes('console.log') || diff.added.includes('debugger');
 });
 if (logFiles.length > 0) {
