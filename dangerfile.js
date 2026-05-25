@@ -31,7 +31,10 @@ if (newSrcFiles.length > 0 && testFiles.length === 0) {
 const codeAdditions = pr.additions || 0;
 const testAdditions = testFiles.reduce((sum, f) => {
   const file = danger.git.diffForFile(f);
-  return sum + (file && file.added ? file.added.split('\n').length : 0);
+  if (!file || !file.added) return sum;
+  if (Array.isArray(file.added)) return sum + file.added.length;
+  if (typeof file.added === 'string') return sum + file.added.split('\n').length;
+  return sum;
 }, 0);
 
 if (codeAdditions > 100 && testAdditions < codeAdditions * 0.15) {
