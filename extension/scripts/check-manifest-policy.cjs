@@ -29,7 +29,17 @@ try {
 }
 
 // 1. Banned permissions (re-added means CWS re-review + likely rejection)
-const BANNED_PERMISSIONS = ['webRequest', 'webRequestBlocking', 'scripting', 'tabs', 'debugger', 'management', 'proxy', 'cookies', 'declarativeNetRequest'];
+const BANNED_PERMISSIONS = [
+  'webRequest',
+  'webRequestBlocking',
+  'scripting',
+  'tabs',
+  'debugger',
+  'management',
+  'proxy',
+  'cookies',
+  'declarativeNetRequest',
+];
 const declaredPerms = manifest.permissions || [];
 for (const banned of BANNED_PERMISSIONS) {
   if (declaredPerms.includes(banned)) {
@@ -51,7 +61,9 @@ const optionalHosts = manifest.optional_host_permissions || [];
 const FLEETEDGE_HOST = 'https://fleetedge.home.tatamotors/*';
 
 if (hostPerms.includes(FLEETEDGE_HOST)) {
-  errors.push('FleetEdge host must live in optional_host_permissions, not host_permissions (clean install screen)');
+  errors.push(
+    'FleetEdge host must live in optional_host_permissions, not host_permissions (clean install screen)'
+  );
 }
 if (!optionalHosts.includes(FLEETEDGE_HOST)) {
   errors.push(`Expected "${FLEETEDGE_HOST}" in optional_host_permissions`);
@@ -79,7 +91,9 @@ if (!manifest.name || manifest.name.length > 75) {
   errors.push(`name must be 1–75 chars (got ${manifest.name?.length})`);
 }
 if (!manifest.description || manifest.description.length > 132) {
-  warnings.push(`description should be ≤132 chars for the store short description (got ${manifest.description?.length})`);
+  warnings.push(
+    `description should be ≤132 chars for the store short description (got ${manifest.description?.length})`
+  );
 }
 
 // 8. CSP — disallow unsafe-eval, remote scripts

@@ -21,9 +21,7 @@ const TOKEN = process.env.LEMU_AUTH_TOKEN || '';
 // Read version from manifest or package.json
 function getVersion() {
   try {
-    const pkg = JSON.parse(
-      fs.readFileSync(path.resolve(__dirname, '..', 'package.json'), 'utf-8')
-    );
+    const pkg = JSON.parse(fs.readFileSync(path.resolve(__dirname, '..', 'package.json'), 'utf-8'));
     return pkg.version;
   } catch {
     return 'unknown';
@@ -72,7 +70,9 @@ async function upload() {
 
     if (resp.ok) {
       const data = await resp.json();
-      console.log(`[upload-sourcemaps] ✅ Uploaded ${data.stored || maps.length} maps for v${version}`);
+      console.log(
+        `[upload-sourcemaps] ✅ Uploaded ${data.stored || maps.length} maps for v${version}`
+      );
     } else {
       console.warn(`[upload-sourcemaps] ⚠️  Upload failed: ${resp.status} ${resp.statusText}`);
     }

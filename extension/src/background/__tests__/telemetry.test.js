@@ -45,9 +45,7 @@ vi.stubGlobal('chrome', {
   },
   runtime: {
     getManifest: vi.fn(() => ({ version: '1.0.1-test' })),
-    getPlatformInfo: vi.fn(() =>
-      Promise.resolve({ os: 'win', arch: 'x86-64' }),
-    ),
+    getPlatformInfo: vi.fn(() => Promise.resolve({ os: 'win', arch: 'x86-64' })),
   },
 });
 
@@ -252,30 +250,18 @@ describe('LEMU telemetry', () => {
     });
 
     it('strips hex IDs', () => {
-      const fp = computeFingerprint(
-        'TASK',
-        'Error',
-        'Cannot find doc abc123def456',
-      );
+      const fp = computeFingerprint('TASK', 'Error', 'Cannot find doc abc123def456');
       expect(fp).toContain('<ID>');
       expect(fp).not.toContain('abc123def456');
     });
 
     it('strips long numbers', () => {
-      const fp = computeFingerprint(
-        'BACKEND',
-        'Error',
-        'Timeout after 15000ms',
-      );
+      const fp = computeFingerprint('BACKEND', 'Error', 'Timeout after 15000ms');
       expect(fp).toContain('<NUM>');
     });
 
     it('strips ISO timestamps', () => {
-      const fp = computeFingerprint(
-        'TASK',
-        'Error',
-        'Failed at 2024-01-15T10:30:00.000Z',
-      );
+      const fp = computeFingerprint('TASK', 'Error', 'Failed at 2024-01-15T10:30:00.000Z');
       expect(fp).toContain('<TS>');
       expect(fp).not.toContain('2024');
     });
@@ -284,7 +270,7 @@ describe('LEMU telemetry', () => {
       const fp = computeFingerprint(
         'BACKEND',
         'Error',
-        'Fetch failed for https://api.example.com/v1/tasks',
+        'Fetch failed for https://api.example.com/v1/tasks'
       );
       expect(fp).toContain('<URL>');
       expect(fp).not.toContain('example.com');
@@ -593,9 +579,9 @@ describe('LEMU telemetry', () => {
       await startTelemetry();
       // Wait a tick for the event buffer
       await new Promise((r) => setTimeout(r, 10));
-      expect(
-        _internals.eventBuffer.some((e) => e.message.includes('LEMU telemetry started')),
-      ).toBe(true);
+      expect(_internals.eventBuffer.some((e) => e.message.includes('LEMU telemetry started'))).toBe(
+        true
+      );
     });
   });
 });

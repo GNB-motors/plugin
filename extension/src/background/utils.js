@@ -26,7 +26,7 @@ export function decodeJwtPayload(token) {
     const padded = base64 + '='.repeat((4 - (base64.length % 4)) % 4);
 
     const binary = atob(padded);
-    const bytes = Uint8Array.from(binary, c => c.charCodeAt(0));
+    const bytes = Uint8Array.from(binary, (c) => c.charCodeAt(0));
     const json = new TextDecoder().decode(bytes);
 
     return JSON.parse(json);
@@ -67,7 +67,7 @@ export function redactToken(token) {
 }
 
 export function sleep(ms) {
-  return new Promise(resolve => setTimeout(resolve, ms));
+  return new Promise((resolve) => setTimeout(resolve, ms));
 }
 
 /**
@@ -94,7 +94,9 @@ export async function withRetry(fn, label = 'operation') {
       if (isAuthError || attempt >= maxAttempts) throw err;
 
       const delay = Math.min(1000 * 2 ** (attempt - 1), 8000);
-      logger.warn(`${label} failed (attempt ${attempt}/${maxAttempts}), retrying in ${delay}ms: ${err.message}`);
+      logger.warn(
+        `${label} failed (attempt ${attempt}/${maxAttempts}), retrying in ${delay}ms: ${err.message}`
+      );
       await sleep(delay);
     }
   }

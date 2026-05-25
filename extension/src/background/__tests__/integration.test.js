@@ -17,14 +17,17 @@ vi.stubGlobal('chrome', {
     local: {
       get: vi.fn((keys) => {
         const result = {};
-        (Array.isArray(keys) ? keys : [keys]).forEach(k => {
+        (Array.isArray(keys) ? keys : [keys]).forEach((k) => {
           if (k in STORE) result[k] = STORE[k];
         });
         return Promise.resolve(result);
       }),
-      set: vi.fn((obj) => { Object.assign(STORE, obj); return Promise.resolve(); }),
+      set: vi.fn((obj) => {
+        Object.assign(STORE, obj);
+        return Promise.resolve();
+      }),
       remove: vi.fn((keys) => {
-        (Array.isArray(keys) ? keys : [keys]).forEach(k => delete STORE[k]);
+        (Array.isArray(keys) ? keys : [keys]).forEach((k) => delete STORE[k]);
         return Promise.resolve();
       }),
     },
@@ -53,8 +56,9 @@ vi.mock('../config.js', () => ({
 }));
 
 // Import real (not mocked) modules — tests their interaction via shared storage
-const { login, logout, isAuthenticated, backendFetch, fetchStatus } =
-  await import('../backendApi.js');
+const { login, logout, isAuthenticated, backendFetch, fetchStatus } = await import(
+  '../backendApi.js'
+);
 const { getMetrics, updateMetrics } = await import('../utils.js');
 const { getLogs, clearLogs } = await import('../logger.js');
 
@@ -62,20 +66,23 @@ const { getLogs, clearLogs } = await import('../logger.js');
 
 function mockFetchSequence(responses) {
   let i = 0;
-  vi.stubGlobal('fetch', vi.fn(async () => {
-    const r = responses[i] || responses[responses.length - 1];
-    i++;
-    return {
-      ok: r.ok !== undefined ? r.ok : (r.status >= 200 && r.status < 300),
-      status: r.status,
-      json: () => Promise.resolve(r.body),
-      text: () => Promise.resolve(JSON.stringify(r.body)),
-    };
-  }));
+  vi.stubGlobal(
+    'fetch',
+    vi.fn(async () => {
+      const r = responses[i] || responses[responses.length - 1];
+      i++;
+      return {
+        ok: r.ok !== undefined ? r.ok : r.status >= 200 && r.status < 300,
+        status: r.status,
+        json: () => Promise.resolve(r.body),
+        text: () => Promise.resolve(JSON.stringify(r.body)),
+      };
+    })
+  );
 }
 
 beforeEach(() => {
-  Object.keys(STORE).forEach(k => delete STORE[k]);
+  Object.keys(STORE).forEach((k) => delete STORE[k]);
   vi.clearAllMocks();
 });
 
@@ -85,7 +92,10 @@ describe('Flow: login → fetchStatus', () => {
   it('full authenticated round-trip', async () => {
     // 1. Login
     mockFetchSequence([
-      { status: 200, body: { data: { token: 'jwt-int-1', user: { name: 'Tester', role: 'OWNER' } } } },
+      {
+        status: 200,
+        body: { data: { token: 'jwt-int-1', user: { name: 'Tester', role: 'OWNER' } } },
+      },
     ]);
     const res = await login('tester@org.com', 'secure');
     expect(res.token).toBe('jwt-int-1');
@@ -104,9 +114,7 @@ describe('Flow: login → fetchStatus', () => {
     STORE.backendUrl = 'https://custom-api.example.com';
     STORE.authToken = 'jwt-custom';
 
-    mockFetchSequence([
-      { status: 200, body: { data: {} } },
-    ]);
+    mockFetchSequence([{ status: 200, body: { data: {} } }]);
     await fetchStatus();
 
     const [calledUrl] = vi.mocked(fetch).mock.calls[0];
@@ -135,18 +143,14 @@ describe('Flow: auth lifecycle', () => {
   it('401 from backend auto-clears auth state', async () => {
     STORE.authToken = 'jwt-stale';
 
-    mockFetchSequence([
-      { status: 401, body: { message: 'jwt expired' } },
-    ]);
+    mockFetchSequence([{ status: 401, body: { message: 'jwt expired' } }]);
 
     await expect(backendFetch('/status')).rejects.toThrow();
     expect(STORE.authToken).toBeUndefined();
   });
 
   it('login with wrong credentials throws and stays unauthenticated', async () => {
-    mockFetchSequence([
-      { status: 401, body: { message: 'Invalid credentials' } },
-    ]);
+    mockFetchSequence([{ status: 401, body: { message: 'Invalid credentials' } }]);
     await expect(login('bad@test.com', 'wrong')).rejects.toThrow('Invalid credentials');
     expect(await isAuthenticated()).toBe(false);
   });
@@ -179,7 +183,10 @@ describe('Flow: FleetEdge link', () => {
     STORE.authToken = 'jwt-ok';
 
     mockFetchSequence([
-      { status: 200, body: { data: { status: 'linked', fleetId: 'F123', remainingSeconds: 3600 } } },
+      {
+        status: 200,
+        body: { data: { status: 'linked', fleetId: 'F123', remainingSeconds: 3600 } },
+      },
     ]);
 
     const response = await backendFetch('/fleetedge/status');
@@ -227,12 +234,17 @@ describe('Flow: logger persistence', () => {
     await clearLogs();
 
     mockFetchSequence([
-      { status: 200, body: { data: { token: 'jwt-log', user: { name: 'Logger', role: 'OWNER' } } } },
+      {
+        status: 200,
+        body: { data: { token: 'jwt-log', user: { name: 'Logger', role: 'OWNER' } } },
+      },
     ]);
     await login('logger@test.com', 'p');
 
     const logs = await getLogs(100);
-    const loginLog = logs.find(l => l.message.includes('Logging in') || l.message.includes('Logged in'));
+    const loginLog = logs.find(
+      (l) => l.message.includes('Logging in') || l.message.includes('Logged in')
+    );
     expect(loginLog).toBeDefined();
     expect(loginLog.module).toBe('BackendAPI');
   });

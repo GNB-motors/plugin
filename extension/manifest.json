@@ -3,17 +3,9 @@
   "name": "gnbedge",
   "version": "0.0.0.2",
   "description": "Connects to your fleet telematics provider and audits fuel consumption tasks through your organization backend.",
-  "permissions": [
-    "storage",
-    "alarms",
-    "notifications"
-  ],
-  "host_permissions": [
-    "https://api.app.gnbedge.in/*"
-  ],
-  "optional_host_permissions": [
-    "https://fleetedge.home.tatamotors/*"
-  ],
+  "permissions": ["storage", "alarms", "notifications"],
+  "host_permissions": ["https://api.app.gnbedge.in/*"],
+  "optional_host_permissions": ["https://fleetedge.home.tatamotors/*"],
   "background": {
     "service_worker": "src/background/index.js",
     "type": "module"

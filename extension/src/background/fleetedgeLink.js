@@ -30,7 +30,8 @@ function updateBadge(accounts) {
     return;
   }
   const now = Date.now();
-  let expired = 0, expiring = 0;
+  let expired = 0,
+    expiring = 0;
   for (const a of accounts) {
     const s = deriveAccountStatus(a, now);
     if (s === 'expired') expired++;
@@ -72,25 +73,33 @@ async function captureTabToken() {
     origins: ['https://fleetedge.home.tatamotors/*'],
   });
   if (!hasPermission) {
-    return { success: false, error: 'Fleet portal access not yet allowed — click Connect to grant permission first' };
+    return {
+      success: false,
+      error: 'Fleet portal access not yet allowed — click Connect to grant permission first',
+    };
   }
 
   const tabs = await chrome.tabs.query({ url: 'https://fleetedge.home.tatamotors/*' });
   if (!tabs.length) {
     tokenTel.warn('No FleetEdge tab found');
-    return { success: false, error: 'No FleetEdge tab open — please open FleetEdge and log in first' };
+    return {
+      success: false,
+      error: 'No FleetEdge tab open — please open FleetEdge and log in first',
+    };
   }
 
-  const tab = tabs.length > 1
-    ? tabs.sort((a, b) => (b.lastAccessed || 0) - (a.lastAccessed || 0))[0]
-    : tabs[0];
+  const tab =
+    tabs.length > 1
+      ? tabs.sort((a, b) => (b.lastAccessed || 0) - (a.lastAccessed || 0))[0]
+      : tabs[0];
 
   let tokenResult;
   try {
     tokenResult = await chrome.tabs.sendMessage(tab.id, { type: 'READ_FLEETEDGE_TOKEN' });
   } catch (err) {
-    const isNoReceiver = err.message?.includes('Could not establish connection') ||
-                         err.message?.includes('Receiving end does not exist');
+    const isNoReceiver =
+      err.message?.includes('Could not establish connection') ||
+      err.message?.includes('Receiving end does not exist');
     if (isNoReceiver) {
       logger.info('Content script not ready — reloading FleetEdge tab and retrying...');
       chrome.tabs.reload(tab.id);
@@ -98,17 +107,30 @@ async function captureTabToken() {
       try {
         tokenResult = await chrome.tabs.sendMessage(tab.id, { type: 'READ_FLEETEDGE_TOKEN' });
       } catch (retryErr) {
-        tokenTel.error('Content script communication failed after retry', { tabId: tab.id, reason: retryErr.message });
-        return { success: false, error: 'Could not communicate with FleetEdge page after refresh — please try again' };
+        tokenTel.error('Content script communication failed after retry', {
+          tabId: tab.id,
+          reason: retryErr.message,
+        });
+        return {
+          success: false,
+          error: 'Could not communicate with FleetEdge page after refresh — please try again',
+        };
       }
     } else {
       tokenTel.error('Content script communication failed', { tabId: tab.id, reason: err.message });
-      return { success: false, error: 'Could not communicate with FleetEdge page — try refreshing the FleetEdge tab' };
+      return {
+        success: false,
+        error: 'Could not communicate with FleetEdge page — try refreshing the FleetEdge tab',
+      };
     }
   }
 
   if (!tokenResult || !tokenResult.success) {
-    return { success: false, error: tokenResult?.error || 'Could not read FleetEdge token — please log in to FleetEdge first' };
+    return {
+      success: false,
+      error:
+        tokenResult?.error || 'Could not read FleetEdge token — please log in to FleetEdge first',
+    };
   }
 
   tokenTel.info('Token read from content script', {
@@ -118,11 +140,20 @@ async function captureTabToken() {
   });
 
   if (tokenResult.exp) {
-    const { valid, remainingSeconds } = checkTokenExpiry({ exp: tokenResult.exp }, MIN_TOKEN_TTL_SECONDS);
+    const { valid, remainingSeconds } = checkTokenExpiry(
+      { exp: tokenResult.exp },
+      MIN_TOKEN_TTL_SECONDS
+    );
     if (!valid) {
       const minutes = Math.max(0, Math.floor(remainingSeconds / 60));
-      tokenTel.warn('Token too close to expiry', { remainingSeconds, fleetId: tokenResult.fleetId });
-      return { success: false, error: `FleetEdge token expires in ${minutes} min — please refresh FleetEdge and try again` };
+      tokenTel.warn('Token too close to expiry', {
+        remainingSeconds,
+        fleetId: tokenResult.fleetId,
+      });
+      return {
+        success: false,
+        error: `FleetEdge token expires in ${minutes} min — please refresh FleetEdge and try again`,
+      };
     }
   }
 
@@ -156,7 +187,10 @@ export async function connectFleetEdge() {
     const status = await getFleetEdgeStatus();
 
     logger.info(`FleetEdge linked: ${result.vehicleCount} vehicles`);
-    feTel.info('FleetEdge linked', { accountId: result.accountId, vehicleCount: result.vehicleCount });
+    feTel.info('FleetEdge linked', {
+      accountId: result.accountId,
+      vehicleCount: result.vehicleCount,
+    });
     feTel.perfEnd('connect');
 
     return {

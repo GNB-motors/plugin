@@ -31,7 +31,10 @@ if (newSrcFiles.length > 0 && testFiles.length === 0) {
 const codeAdditions = pr.additions || 0;
 const testAdditions = testFiles.reduce((sum, f) => {
   const file = danger.git.diffForFile(f);
-  return sum + (file ? file.added.split('\n').length : 0);
+  if (!file || !file.added) return sum;
+  if (Array.isArray(file.added)) return sum + file.added.length;
+  if (typeof file.added === 'string') return sum + file.added.split('\n').length;
+  return sum;
 }, 0);
 
 if (codeAdditions > 100 && testAdditions < codeAdditions * 0.15) {
@@ -72,8 +75,9 @@ if (codeAdditions > 500) {
 // ─── Rule 7: console.log / debugger check ─────────────────────────────────────
 const logFiles = allFiles.filter((f) => {
   const diff = danger.git.diffForFile(f);
-  if (!diff) return false;
-  return diff.added.includes('console.log') || diff.added.includes('debugger');
+  if (!diff || !diff.added) return false;
+  const added = Array.isArray(diff.added) ? diff.added.join('\n') : String(diff.added);
+  return added.includes('console.log') || added.includes('debugger');
 });
 if (logFiles.length > 0) {
   warn(

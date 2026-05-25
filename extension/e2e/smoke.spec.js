@@ -8,10 +8,7 @@ test('popup loads without errors', async () => {
 
   const context = await chromium.launchPersistentContext(userDataDir, {
     headless: false,
-    args: [
-      `--disable-extensions-except=${pathToExtension}`,
-      `--load-extension=${pathToExtension}`,
-    ],
+    args: [`--disable-extensions-except=${pathToExtension}`, `--load-extension=${pathToExtension}`],
   });
 
   // Wait for the service worker to register so we can read the extension ID

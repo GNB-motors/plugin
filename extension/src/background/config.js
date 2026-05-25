@@ -10,13 +10,13 @@ export const config = {
 
   // ─── LEMU Telemetry ─────────────────────────────────────────────────────
   TELEMETRY_ENABLED: true,
-  TELEMETRY_MIN_SEVERITY: 'DEBUG',          // Minimum severity to capture locally
-  TELEMETRY_MAX_EVENTS: 2000,               // Max events in chrome.storage.local
-  TELEMETRY_FLUSH_INTERVAL_MS: 5_000,       // Flush buffer to storage every 5s
-  TELEMETRY_SHIP_TO_BACKEND: true,          // Ship WARN+ events to backend
-  TELEMETRY_BACKEND_ENDPOINT: '/telemetry/ingest',  // Relative to API_PREFIX
-  TELEMETRY_SHIP_BATCH_SIZE: 25,            // Max events per backend shipment
-  TELEMETRY_SHIP_INTERVAL_MS: 60_000,       // Ship to backend every 60s
-  TELEMETRY_HEALTH_CHECK_INTERVAL_MS: 300_000,  // Health snapshot every 5min
-  FETCH_TIMEOUT_MS: 15_000,                 // Global fetch timeout
+  TELEMETRY_MIN_SEVERITY: 'DEBUG', // Minimum severity to capture locally
+  TELEMETRY_MAX_EVENTS: 2000, // Max events in chrome.storage.local
+  TELEMETRY_FLUSH_INTERVAL_MS: 5_000, // Flush buffer to storage every 5s
+  TELEMETRY_SHIP_TO_BACKEND: true, // Ship WARN+ events to backend
+  TELEMETRY_BACKEND_ENDPOINT: '/telemetry/ingest', // Relative to API_PREFIX
+  TELEMETRY_SHIP_BATCH_SIZE: 25, // Max events per backend shipment
+  TELEMETRY_SHIP_INTERVAL_MS: 60_000, // Ship to backend every 60s
+  TELEMETRY_HEALTH_CHECK_INTERVAL_MS: 300_000, // Health snapshot every 5min
+  FETCH_TIMEOUT_MS: 15_000, // Global fetch timeout
 };

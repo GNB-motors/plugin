@@ -14,7 +14,9 @@ vi.mock('../config.js', () => ({ config: { MAX_RETRY_ATTEMPTS: 3 } }));
 
 // Stub chrome for getStorage / setStorage called inside updateMetrics / getMetrics
 vi.stubGlobal('chrome', {
-  storage: { local: { get: vi.fn(() => Promise.resolve({})), set: vi.fn(() => Promise.resolve()) } },
+  storage: {
+    local: { get: vi.fn(() => Promise.resolve({})), set: vi.fn(() => Promise.resolve()) },
+  },
 });
 
 import {
@@ -56,18 +58,18 @@ describe('buildUtcWindow', () => {
     const { from, to } = buildUtcWindow('2026-02-14', '12:00', 30);
     // from and to are formatted strings — compare as Dates
     const fromMs = new Date(from + 'Z').getTime();
-    const toMs   = new Date(to   + 'Z').getTime();
+    const toMs = new Date(to + 'Z').getTime();
     expect(toMs - fromMs).toBe(60 * 60 * 1000); // 30 min each side = 60 min total
   });
 
   it('centres the window around the given IST time', () => {
     const { from, to } = buildUtcWindow('2026-02-14', '06:30', 60);
     const centreUtc = istToUtc('2026-02-14', '06:30');
-    const centreMs  = new Date(centreUtc + 'Z').getTime();
-    const fromMs    = new Date(from       + 'Z').getTime();
-    const toMs      = new Date(to         + 'Z').getTime();
-    expect(centreMs - fromMs).toBe(60 * 60 * 1000);   // 60 min before
-    expect(toMs - centreMs).toBe(60 * 60 * 1000);     // 60 min after
+    const centreMs = new Date(centreUtc + 'Z').getTime();
+    const fromMs = new Date(from + 'Z').getTime();
+    const toMs = new Date(to + 'Z').getTime();
+    expect(centreMs - fromMs).toBe(60 * 60 * 1000); // 60 min before
+    expect(toMs - centreMs).toBe(60 * 60 * 1000); // 60 min after
   });
 });
 
@@ -98,8 +100,12 @@ describe('formatUtcDatetime', () => {
 
 // ─── checkTokenExpiry ────────────────────────────────────────────────────────
 describe('checkTokenExpiry', () => {
-  beforeEach(() => { vi.useFakeTimers(); });
-  afterEach(() => { vi.useRealTimers(); });
+  beforeEach(() => {
+    vi.useFakeTimers();
+  });
+  afterEach(() => {
+    vi.useRealTimers();
+  });
 
   it('returns valid=false and remainingSeconds=0 when payload is null', () => {
     expect(checkTokenExpiry(null)).toEqual({ valid: false, remainingSeconds: 0 });
@@ -110,7 +116,7 @@ describe('checkTokenExpiry', () => {
     const now = Math.floor(Date.now() / 1000);
     vi.setSystemTime(now * 1000);
     const payload = { exp: now + 3600 }; // expires in 1 hour
-    const result  = checkTokenExpiry(payload, 60);
+    const result = checkTokenExpiry(payload, 60);
     expect(result.valid).toBe(true);
     expect(result.remainingSeconds).toBe(3600);
   });
@@ -119,7 +125,7 @@ describe('checkTokenExpiry', () => {
     const now = Math.floor(Date.now() / 1000);
     vi.setSystemTime(now * 1000);
     const payload = { exp: now + 30 }; // 30s left, buffer=60
-    const result  = checkTokenExpiry(payload, 60);
+    const result = checkTokenExpiry(payload, 60);
     expect(result.valid).toBe(false);
     expect(result.remainingSeconds).toBe(30);
   });
@@ -128,7 +134,7 @@ describe('checkTokenExpiry', () => {
     const now = Math.floor(Date.now() / 1000);
     vi.setSystemTime(now * 1000);
     const payload = { exp: now - 100 }; // expired 100s ago
-    const result  = checkTokenExpiry(payload, 60);
+    const result = checkTokenExpiry(payload, 60);
     expect(result.valid).toBe(false);
     expect(result.remainingSeconds).toBe(0);
   });
@@ -136,8 +142,12 @@ describe('checkTokenExpiry', () => {
 
 // ─── withRetry ───────────────────────────────────────────────────────────────
 describe('withRetry', () => {
-  beforeEach(() => { vi.useFakeTimers(); });
-  afterEach(() => { vi.useRealTimers(); });
+  beforeEach(() => {
+    vi.useFakeTimers();
+  });
+  afterEach(() => {
+    vi.useRealTimers();
+  });
 
   it('resolves immediately when the operation succeeds on first try', async () => {
     const fn = vi.fn().mockResolvedValue('ok');
@@ -146,9 +156,7 @@ describe('withRetry', () => {
   });
 
   it('retries on failure and resolves on a later attempt', async () => {
-    const fn = vi.fn()
-      .mockRejectedValueOnce(new Error('transient'))
-      .mockResolvedValue('recovered');
+    const fn = vi.fn().mockRejectedValueOnce(new Error('transient')).mockResolvedValue('recovered');
     const assertion = expect(withRetry(fn, 'op')).resolves.toBe('recovered');
     await vi.runAllTimersAsync();
     await assertion;

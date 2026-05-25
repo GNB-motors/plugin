@@ -58,7 +58,7 @@ class Logger {
       timestamp: Date.now(),
       level: levelName,
       module: this.module,
-      message: args.map(a => typeof a === 'object' ? JSON.stringify(a) : String(a)).join(' '),
+      message: args.map((a) => (typeof a === 'object' ? JSON.stringify(a) : String(a))).join(' '),
     });
 
     if (buffer.length >= FLUSH_THRESHOLD) {
@@ -68,10 +68,18 @@ class Logger {
     }
   }
 
-  debug(...args) { this._log(LOG_LEVELS.DEBUG, 'DEBUG', ...args); }
-  info(...args)  { this._log(LOG_LEVELS.INFO, 'INFO', ...args); }
-  warn(...args)  { this._log(LOG_LEVELS.WARN, 'WARN', ...args); }
-  error(...args) { this._log(LOG_LEVELS.ERROR, 'ERROR', ...args); }
+  debug(...args) {
+    this._log(LOG_LEVELS.DEBUG, 'DEBUG', ...args);
+  }
+  info(...args) {
+    this._log(LOG_LEVELS.INFO, 'INFO', ...args);
+  }
+  warn(...args) {
+    this._log(LOG_LEVELS.WARN, 'WARN', ...args);
+  }
+  error(...args) {
+    this._log(LOG_LEVELS.ERROR, 'ERROR', ...args);
+  }
 }
 
 export function createLogger(module) {

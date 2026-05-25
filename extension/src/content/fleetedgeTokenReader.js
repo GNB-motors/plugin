@@ -3,8 +3,8 @@
  * ───────────────────────────────────────
  * Receives the live token intercepted by the MAIN world networkSpy.js
  * via window.postMessage.
- * 
- * Also contains fallback logic to scrape localStorage if the user hasn't 
+ *
+ * Also contains fallback logic to scrape localStorage if the user hasn't
  * triggered a network request yet.
  */
 
@@ -16,7 +16,7 @@ window.addEventListener('message', (event) => {
   if (event.source !== window || !event.data || event.data.type !== 'FLEETEDGE_INTERCEPT') {
     return;
   }
-  
+
   if (event.data.token) interceptedToken = event.data.token;
   if (event.data.fleetId) interceptedFleetId = event.data.fleetId;
 
@@ -52,15 +52,15 @@ function readFleetEdgeToken() {
   // If we intercepted a live token, parse it immediately and return it.
   if (interceptedToken) {
     const payload = decodeJwtPayload(interceptedToken);
-    
+
     // Always fall back to payload fleet_id if the intercept didn't catch a body with fleet_id
     let bestFleetId = interceptedFleetId;
     if (payload && payload.fleet_id) {
       bestFleetId = payload.fleet_id;
     }
-    
+
     if (!bestFleetId) {
-      bestFleetId = "UNKNOWN_FLEET";
+      bestFleetId = 'UNKNOWN_FLEET';
     }
 
     return {
@@ -92,7 +92,11 @@ function fallbackLocalStorageScan() {
   const allFleetIds = [];
 
   function safeJSONParse(str) {
-    try { return JSON.parse(str); } catch { return null; }
+    try {
+      return JSON.parse(str);
+    } catch {
+      return null;
+    }
   }
 
   function scanStorage(storage, prefix) {
@@ -110,7 +114,11 @@ function fallbackLocalStorageScan() {
       if (obj && typeof obj === 'object') {
         const accessToken = obj.access_token || obj.token || obj.accessToken || obj.id_token;
         if (accessToken && isJwt(accessToken)) {
-          allJwts.push({ token: accessToken, payload: decodeJwtPayload(accessToken), key: `${prefix}:${key}` });
+          allJwts.push({
+            token: accessToken,
+            payload: decodeJwtPayload(accessToken),
+            key: `${prefix}:${key}`,
+          });
         }
         if (obj.fleet_id) allFleetIds.push(String(obj.fleet_id));
         else if (obj.fleetId) allFleetIds.push(String(obj.fleetId));
@@ -126,23 +134,38 @@ function fallbackLocalStorageScan() {
     }
   }
 
-  try { scanStorage(localStorage, 'local'); } catch { console.debug('[FleetEdge Token Reader] Local storage access failed'); }
-  try { scanStorage(sessionStorage, 'session'); } catch { console.debug('[FleetEdge Token Reader] Session storage access failed'); }
+  try {
+    scanStorage(localStorage, 'local');
+  } catch {
+    console.debug('[FleetEdge Token Reader] Local storage access failed');
+  }
+  try {
+    scanStorage(sessionStorage, 'session');
+  } catch {
+    console.debug('[FleetEdge Token Reader] Session storage access failed');
+  }
 
   let bestJwt = null;
   const now = Date.now() / 1000;
   for (const jwtInfo of allJwts) {
     if (jwtInfo.payload && jwtInfo.payload.fleet_id) {
       bestJwt = jwtInfo;
-      break; 
+      break;
     }
-    if (!bestJwt || (!bestJwt.payload?.exp || bestJwt.payload.exp < now) && (jwtInfo.payload?.exp > now)) {
+    if (
+      !bestJwt ||
+      ((!bestJwt.payload?.exp || bestJwt.payload.exp < now) && jwtInfo.payload?.exp > now)
+    ) {
       bestJwt = jwtInfo;
     }
   }
 
   if (!bestJwt) {
-    return { success: false, error: 'Network interceptor is waiting for FleetEdge to load data. Scroll around the map on FleetEdge, then try connecting again.' };
+    return {
+      success: false,
+      error:
+        'Network interceptor is waiting for FleetEdge to load data. Scroll around the map on FleetEdge, then try connecting again.',
+    };
   }
 
   let finalFleetId = null;
@@ -151,7 +174,7 @@ function fallbackLocalStorageScan() {
   } else if (allFleetIds.length > 0) {
     finalFleetId = allFleetIds[0];
   } else {
-    finalFleetId = "UNKNOWN_FLEET";
+    finalFleetId = 'UNKNOWN_FLEET';
   }
 
   return {

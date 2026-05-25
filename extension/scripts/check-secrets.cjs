@@ -19,7 +19,11 @@ const issues = [];
 // Patterns that should not appear in source. Format: [regex, severity, label]
 const PATTERNS = [
   // Hardcoded secrets — naive but catches the obvious mistakes
-  [/(?:api[_-]?key|apikey|secret|password|passwd|token)\s*[:=]\s*['"][A-Za-z0-9_\-]{16,}['"]/gi, 'error', 'Possible hardcoded secret'],
+  [
+    /(?:api[_-]?key|apikey|secret|password|passwd|token)\s*[:=]\s*['"][A-Za-z0-9_\-]{16,}['"]/gi,
+    'error',
+    'Possible hardcoded secret',
+  ],
   [/Bearer\s+[A-Za-z0-9_\-.]{30,}/g, 'error', 'Hardcoded Bearer token'],
   [/eyJ[A-Za-z0-9_\-]{20,}\.[A-Za-z0-9_\-]{20,}\.[A-Za-z0-9_\-]{10,}/g, 'error', 'Hardcoded JWT'],
   // AWS-style keys
@@ -32,7 +36,11 @@ const PATTERNS = [
   [/new\s+Function\s*\(/g, 'error', 'new Function() — banned by CWS MV3'],
 
   // XSS risk
-  [/\.innerHTML\s*=\s*(?!['"`]\s*['"`])/g, 'warning', 'innerHTML assignment — verify input is sanitized'],
+  [
+    /\.innerHTML\s*=\s*(?!['"`]\s*['"`])/g,
+    'warning',
+    'innerHTML assignment — verify input is sanitized',
+  ],
   [/document\.write\s*\(/g, 'error', 'document.write() — banned in MV3 service workers'],
 
   // Remote code loading
@@ -43,7 +51,7 @@ const PATTERNS = [
 // Files / patterns to skip
 const SKIP_PATTERNS = [
   /\bnode_modules\b/,
-  /\b__tests__\b/,        // tests legitimately contain fixture tokens
+  /\b__tests__\b/, // tests legitimately contain fixture tokens
   /\.test\.js$/,
   /\.spec\.js$/,
 ];
@@ -53,7 +61,7 @@ function walk(dir) {
   if (!fs.existsSync(dir)) return out;
   for (const entry of fs.readdirSync(dir, { withFileTypes: true })) {
     const full = path.join(dir, entry.name);
-    if (SKIP_PATTERNS.some(p => p.test(full))) continue;
+    if (SKIP_PATTERNS.some((p) => p.test(full))) continue;
     if (entry.isDirectory()) {
       out.push(...walk(full));
     } else if (/\.(jsx?|html|css)$/.test(entry.name)) {
@@ -79,7 +87,10 @@ for (const file of files) {
       let lineNo = 1;
       let cum = 0;
       for (let i = 0; i < lines.length; i++) {
-        if (cum + lines[i].length + 1 > offset) { lineNo = i + 1; break; }
+        if (cum + lines[i].length + 1 > offset) {
+          lineNo = i + 1;
+          break;
+        }
         cum += lines[i].length + 1;
       }
       const rel = path.relative(path.join(__dirname, '..'), file).replace(/\\/g, '/');
@@ -88,12 +99,13 @@ for (const file of files) {
   }
 }
 
-const errors = issues.filter(i => i.severity === 'error');
-const warnings = issues.filter(i => i.severity === 'warning');
+const errors = issues.filter((i) => i.severity === 'error');
+const warnings = issues.filter((i) => i.severity === 'warning');
 
 if (warnings.length) {
   console.log('\nWarnings:');
-  for (const w of warnings) console.log(`  ⚠  ${w.file}:${w.line} — ${w.label}\n      ${w.snippet}`);
+  for (const w of warnings)
+    console.log(`  ⚠  ${w.file}:${w.line} — ${w.label}\n      ${w.snippet}`);
 }
 
 if (errors.length) {
@@ -103,4 +115,6 @@ if (errors.length) {
   process.exit(1);
 }
 
-console.log(`\n✓ Source clean — no hardcoded secrets or banned patterns (${warnings.length} warning${warnings.length === 1 ? '' : 's'})`);
+console.log(
+  `\n✓ Source clean — no hardcoded secrets or banned patterns (${warnings.length} warning${warnings.length === 1 ? '' : 's'})`
+);

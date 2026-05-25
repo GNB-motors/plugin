@@ -13,7 +13,7 @@ vi.stubGlobal('chrome', {
     local: {
       get: vi.fn((keys) => {
         const result = {};
-        (Array.isArray(keys) ? keys : [keys]).forEach(k => {
+        (Array.isArray(keys) ? keys : [keys]).forEach((k) => {
           if (k in mockStorage) result[k] = mockStorage[k];
         });
         return Promise.resolve(result);
@@ -23,7 +23,7 @@ vi.stubGlobal('chrome', {
         return Promise.resolve();
       }),
       remove: vi.fn((keys) => {
-        (Array.isArray(keys) ? keys : [keys]).forEach(k => delete mockStorage[k]);
+        (Array.isArray(keys) ? keys : [keys]).forEach((k) => delete mockStorage[k]);
         return Promise.resolve();
       }),
     },
@@ -39,7 +39,7 @@ const { createLogger, getLogs, clearLogs } = await import('../logger.js');
 
 describe('logger', () => {
   beforeEach(() => {
-    Object.keys(mockStorage).forEach(k => delete mockStorage[k]);
+    Object.keys(mockStorage).forEach((k) => delete mockStorage[k]);
   });
 
   describe('createLogger', () => {
@@ -64,7 +64,7 @@ describe('logger', () => {
       log.info('test message');
       // Flush via getLogs (which reads from buffered entries before they persist)
       const entries = await getLogs(10);
-      const found = entries.some(e => e.module === 'MyMod' && e.message.includes('test message'));
+      const found = entries.some((e) => e.module === 'MyMod' && e.message.includes('test message'));
       expect(found).toBe(true);
     });
   });
@@ -90,7 +90,7 @@ describe('logger', () => {
       await clearLogs();
       const remaining = await getLogs(100);
       // After clear, only entries buffered after the clear should exist
-      const beforeClear = remaining.filter(e => e.message === 'before clear');
+      const beforeClear = remaining.filter((e) => e.message === 'before clear');
       expect(beforeClear).toHaveLength(0);
     });
   });

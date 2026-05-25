@@ -22,7 +22,17 @@ import {
 import { getStorage, setStorage, removeStorage } from './utils.js';
 import { getLogs, clearLogs, createLogger } from './logger.js';
 import { login, logout, isAuthenticated, backendFetch, fetchStatus } from './backendApi.js';
-import { startTelemetry, record, LAYERS, createLayerLogger, getEvents, clearEvents, getStats, getHealthSnapshot, getBreadcrumbs } from './telemetry.js';
+import {
+  startTelemetry,
+  record,
+  LAYERS,
+  createLayerLogger,
+  getEvents,
+  clearEvents,
+  getStats,
+  getHealthSnapshot,
+  getBreadcrumbs,
+} from './telemetry.js';
 import { config } from './config.js';
 
 const logger = createLogger('ServiceWorker');
@@ -42,7 +52,7 @@ let _statusCacheTime = 0;
  */
 async function getCachedFleetEdgeStatus() {
   const now = Date.now();
-  if (_statusPromise && (now - _statusCacheTime) < STATUS_CACHE_TTL_MS) {
+  if (_statusPromise && now - _statusCacheTime < STATUS_CACHE_TTL_MS) {
     return _statusPromise;
   }
   _statusCacheTime = now;
@@ -86,14 +96,20 @@ chrome.alarms.onAlarm.addListener(async (alarm) => {
 });
 
 // Auto-check FleetEdge status on startup if authenticated
-isAuthenticated().then(async (authed) => {
-  if (authed) {
-    logger.info('Already authenticated — checking FleetEdge status');
-    try {
-      await getCachedFleetEdgeStatus();
-    } catch { /* startup check — non-critical, retried by alarm */ }
-  }
-}).catch(() => { /* guard against isAuthenticated rejection */ });
+isAuthenticated()
+  .then(async (authed) => {
+    if (authed) {
+      logger.info('Already authenticated — checking FleetEdge status');
+      try {
+        await getCachedFleetEdgeStatus();
+      } catch {
+        /* startup check — non-critical, retried by alarm */
+      }
+    }
+  })
+  .catch(() => {
+    /* guard against isAuthenticated rejection */
+  });
 
 // ─── Message Handler ─────────────────────────────────────────────────────────
 
@@ -101,16 +117,17 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
   // Ignore messages from content scripts that aren't meant for us
   if (message.type === 'READ_FLEETEDGE_TOKEN') return false;
 
-  handleMessage(message).then(sendResponse).catch(err => {
-    logger.error('Message handler error', err.message);
-    sendResponse({ error: err.message });
-  });
+  handleMessage(message)
+    .then(sendResponse)
+    .catch((err) => {
+      logger.error('Message handler error', err.message);
+      sendResponse({ error: err.message });
+    });
   return true;
 });
 
 async function handleMessage(message) {
   switch (message.type) {
-
     case 'LOGIN': {
       const { emailOrMobile, password } = message;
       if (!emailOrMobile || !password) throw new Error('Email/mobile and password are required');
@@ -139,8 +156,11 @@ async function handleMessage(message) {
 
     case 'GET_STATUS': {
       const store = await getStorage([
-        'authToken', 'authUser', 'backendUrl',
-        'fleetEdgeAccounts', 'fleetEdgePull',
+        'authToken',
+        'authUser',
+        'backendUrl',
+        'fleetEdgeAccounts',
+        'fleetEdgePull',
       ]);
 
       const cachedFe = {
@@ -151,7 +171,9 @@ async function handleMessage(message) {
       // Parallel fetch: backend status + FleetEdge status if authenticated
       const [backendStatus, feStatus] = await Promise.all([
         store.authToken
-          ? fetchStatus().then(r => r.data).catch(() => null)
+          ? fetchStatus()
+              .then((r) => r.data)
+              .catch(() => null)
           : Promise.resolve(null),
         store.authToken
           ? getCachedFleetEdgeStatus().catch(() => cachedFe)
@@ -171,11 +193,11 @@ async function handleMessage(message) {
           },
         },
         metrics: {
-          pending:    backendStatus?.pending    ?? 0,
+          pending: backendStatus?.pending ?? 0,
           inProgress: backendStatus?.inProgress ?? 0,
-          completed:  backendStatus?.completed  ?? 0,
-          flagged:    backendStatus?.flagged    ?? 0,
-          noData:     backendStatus?.noData     ?? 0,
+          completed: backendStatus?.completed ?? 0,
+          flagged: backendStatus?.flagged ?? 0,
+          noData: backendStatus?.noData ?? 0,
         },
         backendStatus,
       };
@@ -184,7 +206,11 @@ async function handleMessage(message) {
     case 'SET_BACKEND_URL': {
       if (!message.url) throw new Error('URL is required');
       // Validate URL format before storing
-      try { new URL(message.url); } catch { throw new Error('Invalid URL format'); }
+      try {
+        new URL(message.url);
+      } catch {
+        throw new Error('Invalid URL format');
+      }
       await setStorage({ backendUrl: message.url });
       invalidateStatusCache();
       logger.info(`Backend URL updated: ${message.url}`);
@@ -272,13 +298,18 @@ async function handleMessage(message) {
       // Disconnect FleetEdge on backend
       try {
         await disconnectFleetEdge();
-      } catch { /* best-effort disconnect — proceed with clearing data */ }
+      } catch {
+        /* best-effort disconnect — proceed with clearing data */
+      }
 
       invalidateStatusCache();
 
       await removeStorage([
-        'authToken', 'authUser', 'backendUrl',
-        'fleetEdgeAccounts', 'fleetEdgePull',
+        'authToken',
+        'authUser',
+        'backendUrl',
+        'fleetEdgeAccounts',
+        'fleetEdgePull',
         'metrics',
       ]);
       chrome.action.setBadgeText({ text: '' });
