@@ -76,7 +76,8 @@ if (codeAdditions > 500) {
 const logFiles = allFiles.filter((f) => {
   const diff = danger.git.diffForFile(f);
   if (!diff || !diff.added) return false;
-  return diff.added.includes('console.log') || diff.added.includes('debugger');
+  const added = Array.isArray(diff.added) ? diff.added.join('\n') : String(diff.added);
+  return added.includes('console.log') || added.includes('debugger');
 });
 if (logFiles.length > 0) {
   warn(
