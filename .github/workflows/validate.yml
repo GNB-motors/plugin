@@ -24,7 +24,15 @@ jobs:
         run: npx @biomejs/biome format .
 
       - name: Unit + integration tests with coverage
-        run: npm run test:coverage
+        run: npm run test:coverage -- --coverage.reporter=lcov --coverage.reporter=json-summary --coverage.reporter=text
+
+      - name: Upload coverage to Codecov
+        uses: codecov/codecov-action@v4
+        with:
+          token: ${{ secrets.CODECOV_TOKEN }}
+          files: extension/coverage/lcov.info
+          flags: extension-unit
+          fail_ci_if_error: false
 
       - name: Build
         run: npm run build
