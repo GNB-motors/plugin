@@ -47,7 +47,7 @@
       }
       window.postMessage(
         { type: 'FLEETEDGE_INTERCEPT', token: this._interceptedToken, fleetId },
-        window.location.origin
+        '*'
       );
     }
     return originalXhrSend.apply(this, arguments);
@@ -75,7 +75,7 @@
           console.debug('[FleetEdge Interceptor] Parsing error:', e);
         }
 
-        window.postMessage({ type: 'FLEETEDGE_INTERCEPT', token, fleetId }, window.location.origin);
+        window.postMessage({ type: 'FLEETEDGE_INTERCEPT', token, fleetId }, '*');
       }
     } catch (e) {
       console.debug('[FleetEdge Interceptor] Fetch error:', e);
