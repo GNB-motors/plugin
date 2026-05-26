@@ -1,0 +1,41 @@
+language: en-US
+early_access: false
+enable_free_tier: true
+
+reviews:
+  profile: chill
+  request_changes_workflow: false
+  high_level_summary: true
+  poem: false
+  review_status: true
+  collapse_walkthrough: true
+  auto_review:
+    enabled: true
+    drafts: false
+    base_branches:
+      - main
+  path_filters:
+    - "!extension/dist/**"
+    - "!extension/coverage/**"
+    - "!extension/node_modules/**"
+    - "!**/*.lock"
+    - "!**/package-lock.json"
+  path_instructions:
+    - path: "extension/src/background/**"
+      instructions: |
+        Background service worker code (Manifest V3). Pay attention to:
+        - chrome.* API mocking compatibility with existing tests in __tests__/
+        - Token handling (encryption, expiry, redaction in logs)
+        - FleetEdge API contract drift (see AGENTS.md backend integration section)
+        - Permission and host scope changes
+    - path: "extension/manifest.json"
+      instructions: |
+        CWS-critical. Block changes that add webRequest, scripting, tabs, declarativeNetRequest,
+        or move fleetedge.home.tatamotors out of optional_host_permissions. Confirm version bump.
+    - path: ".github/workflows/**"
+      instructions: |
+        CI workflows. Flag shell-injection patterns (${{...}} in run: blocks should use env vars).
+        Confirm required status checks aren't accidentally removed.
+
+chat:
+  auto_reply: true

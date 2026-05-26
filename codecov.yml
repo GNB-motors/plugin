@@ -1,0 +1,31 @@
+coverage:
+  status:
+    project:
+      default:
+        target: 80%
+        threshold: 1%
+        informational: false
+    patch:
+      default:
+        target: 80%
+        threshold: 1%
+        informational: false
+
+comment:
+  layout: "header, diff, flags, components, files, footer"
+  behavior: default
+  require_changes: false
+
+flags:
+  extension-unit:
+    paths:
+      - extension/src/background/
+    carryforward: true
+
+ignore:
+  - "extension/src/background/__tests__/**"
+  - "extension/e2e/**"
+  - "extension/scripts/**"
+  - "extension/dist/**"
+  - "**/*.config.js"
+  - "**/*.config.ts"
