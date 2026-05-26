@@ -2,6 +2,36 @@
 
 ---
 
+## [2026-05-26] — branch: feat/externally-connectable-onboarding
+
+### Web onboarding can now detect the extension (manifest 0.0.0.2 → 0.0.0.3)
+
+The frontend onboarding flow (`main-frontend` PR #38) attempts a 3-layer
+detection (`chrome.runtime.sendMessage`, DOM marker, image probe at
+`chrome-extension://<id>/icons/icon16.png`). With the previous manifest none
+of the layers could fire and the UI always fell back to the manual "I've
+installed it" checkbox. This update enables Layer 1 and Layer 3.
+
+#### manifest.json
+- **`externally_connectable.matches`** added:
+  - `https://app.gnbedge.in/*` (prod frontend)
+  - `https://main-frontend-wine.vercel.app/*` (dev frontend, Vercel)
+- **`web_accessible_resources`** added for `icons/icon16.png` on the same two origins.
+- **`version`** bumped `0.0.0.2` → `0.0.0.3` (CWS rejects same-version re-uploads).
+
+#### src/background/index.js
+- Added `chrome.runtime.onMessageExternal` listener responding to `{ type: 'PING' }`
+  with `{ ok: true, version }`. Required for Layer 1 to resolve. No auth state exposed.
+
+#### CWS submission notes
+- This is a permission expansion — Google review may ask for justification.
+  Suggested wording: *"`externally_connectable` is required so our web app
+  (`app.gnbedge.in`) can detect that the extension is installed during the
+  user onboarding flow. The extension only responds to a single 'PING'
+  message and exposes no user data."*
+
+---
+
 ## [2026-05-22] — branch: Devayan
 
 ### CI hardening, security audits, and repo automation

@@ -126,6 +126,22 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
   return true;
 });
 
+// ─── External Message Handler ────────────────────────────────────────────────
+// Allows the onboarding flow on app.gnbedge.in (and dev) to detect the
+// extension via chrome.runtime.sendMessage(EXTENSION_ID, { type: 'PING' }).
+// Only origins listed in manifest "externally_connectable.matches" can reach
+// this listener. No authentication state is exposed.
+chrome.runtime.onMessageExternal.addListener((message, _sender, sendResponse) => {
+  if (message?.type === 'PING') {
+    sendResponse({
+      ok: true,
+      version: chrome.runtime.getManifest().version,
+    });
+    return;
+  }
+  sendResponse({ ok: false, error: 'unsupported_message_type' });
+});
+
 async function handleMessage(message) {
   switch (message.type) {
     case 'LOGIN': {
