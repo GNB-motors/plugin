@@ -644,6 +644,7 @@ describe('index.js — v2 improvements (handleMessage logic)', () => {
       },
       runtime: {
         onMessage: { addListener: vi.fn() },
+        onMessageExternal: { addListener: vi.fn() },
         onInstalled: { addListener: vi.fn() },
         getManifest: vi.fn(() => ({ version: '2.0.0' })),
       },
