@@ -39,11 +39,16 @@ plugin/
 
 ## Active branches
 
-- `Devayan` — currently the latest. Contains everything in `updated-design` plus the multi-account popup redesign, CI hardening, and security audits. Releases are cut from here.
-- `updated-design` — older, contains the CWS-compliance pass and the auto-refresh retry. Kept for history; new work should branch from `Devayan`.
-- `main` — **protected production branch**. Has branch protection (1 approval + 4 required status checks). Workflow files and docs are seeded here so status checks work. Do not push directly.
+- `main` — **protected production branch**. Releases are cut from here. Has a ruleset (`main protection`) requiring 1 approval + 4 status checks (`build-and-test`, `cws-policy-check`, `security-audit`, `smoke`) with `strict=True` (branch must include latest main before checks count). New work targets `main` directly via short-lived feature branches.
+- `plugin` — the older integration line that fed into `main` via PR #37 (May 2026). Kept for history; **do not branch off this**, branch off `main`.
+- `Devayan` — even older release-cut line, superseded by the `plugin → main` flow above. **Do not branch off Devayan** — its tree diverges from `main` and any PR back to `main` from here will conflict and risk reverting newer popup / CI work. AGENTS.md previously named Devayan as "currently the latest"; that is no longer true.
+
+New feature branch convention: `feat/<short-slug>`, `fix/<short-slug>`, `chore/<short-slug>`, `docs/<short-slug>` — branched from `main`, PR to `main`.
 
 When the user says "push", confirm the target branch before pushing — branch policies vary per repo.
+
+### After "Update branch" on a PR
+If GitHub's "Update branch" button creates a merge commit that doesn't trigger CI (checks stuck on `Expected — Waiting for status to be reported`), push an empty commit (`git commit --allow-empty -m "chore: re-trigger CI"`). This forces a `pull_request: synchronize` event and the workflows fire correctly.
 
 ## Build / test / lint
 
@@ -124,6 +129,8 @@ If the backend is changed in a way that breaks these contracts (e.g. renaming a 
 - **No `Co-Authored-By:` trailers.** The user has corrected this multiple times; respect it.
 - **One PR per logical change.** Don't bundle the auto-refresh fix with the multi-account UI redesign — they review independently.
 - **`CHANGELOG.md` gets a new dated section per session.** Format: `## [YYYY-MM-DD] — branch: <branch>`. New entries go at the top.
+- **`gh` CLI on the dev machine is authenticated as a bot account (`h2m6jcm94s-eng`)**, not as the user's personal account. PRs opened from here will be attributed to the bot. The `auto-assign.yml` workflow re-routes the assignee to `@ItsDevayan`. To open PRs under your own name, run `gh auth logout && gh auth login` first.
+- **`CODEOWNERS` is single-owner (`* @ItsDevayan`)** as of May 2026. Don't restore the old 6-owner team list — it caused review-request email spam to the whole team on every PR.
 
 ## What NOT to do without asking
 
@@ -140,7 +147,8 @@ If the backend is changed in a way that breaks these contracts (e.g. renaming a 
 |---|---|
 | "Connect FleetEdge" fails | `src/background/fleetedgeLink.js` + check FleetEdge tab is open |
 | Tasks never process | Backend `FleetEdgeCronService.runForOrg` / `FleetEdgePullService` + check the org has at least one `ACTIVE` `UserFleetEdgeToken` row (encrypted, not on `User`) |
-| Tests fail with "chrome.tabs.X is not a function" | Mock missing in `edge-cases-v2.test.js > makeStore` or per-test mock |
+| Tests fail with "chrome.tabs.X is not a function" or "chrome.runtime.X.addListener is not a function" | Mock missing in `edge-cases-v2.test.js > makeStore` or per-test mock. When you add a new `chrome.*` API to production code, add the corresponding mock shape (`{ addListener: vi.fn() }` for event listeners). |
+| CI checks stuck on "Expected — Waiting for status to be reported" after "Update branch" | Push an empty commit: `git commit --allow-empty -m "chore: re-trigger CI"`. The branch protection ruleset uses `strict=True`, and GitHub sometimes doesn't fire `pull_request: synchronize` on a web-UI merge commit. |
 | Build fails | Delete `extension/node_modules` + `package-lock.json`, reinstall |
 | CWS upload fails "manifest not at root" | Re-zip with `Compress-Archive -Path "dist\*"` (the `\*` is essential) |
 | Popup shows stale data | Background service worker cached; refresh it on `chrome://extensions/` |

@@ -64,7 +64,7 @@ Bridges an authorized fleet telematics session with the user's organization back
 | `storage` | Persists the user's sign-in token, backend URL, and last-seen task counts locally so the popup can render quickly and the service worker can resume after restarts. |
 | `alarms` | Schedules a 2-minute periodic background refresh that polls the user's organization backend for task status and token validity. |
 | `notifications` | Alerts the user when their fleet portal session token expires (~24h) so they know to reconnect. |
-| Host: `https://api.app.gnbedge.in/*` | The user's organization backend. The extension sends authentication requests, retrieves task status, and forwards the fleet portal token here. All traffic is HTTPS. |
+| Host: `https://api.app.gnbedge.in/*` | The user's organization backend. The extension sends authentication requests, retrieves task status, and forwards the fleet portal token here. All traffic is HTTPS. The manifest also declares `externally_connectable` for `https://app.gnbedge.in/*` (production web app) and `https://main-frontend-wine.vercel.app/*` (development frontend); these origins can send a single `{ type: "PING" }` message during the user onboarding flow so the web app can detect that the extension is installed. The extension responds only with `{ ok: true, version }` and exposes no user data or authenticated state via this channel. |
 | Optional host: `https://fleetedge.home.tatamotors/*` | **Requested at runtime only — not granted at install.** The user must explicitly click "Connect Fleet Portal" to trigger the permission prompt. Once granted, two declared content scripts run on this host: one reads the user's existing authenticated session token from the page's network requests (MAIN world), and passes it to the extension's isolated context, which forwards it to the user's backend. The extension never injects data, never reads other sites, and the host is never accessed without an explicit user action. |
 
 ### Remote code use
@@ -91,9 +91,9 @@ The extension does not load or execute any remotely hosted JavaScript, WASM, or 
 
 ### Privacy policy URL
 ```
-https://<your-host>/privacy.html
+https://gnb-motors.github.io/gnbedge-pages/
 ```
-A copy of the policy is at [public/privacy.html](public/privacy.html). Host it (GitHub Pages instructions below) and paste the public URL into the dashboard.
+Hosted from the `GNB-motors/gnbedge-pages` repo via GitHub Pages. Support URL: `https://gnb-motors.github.io/gnbedge-pages/support.html`. Edit the HTML in that repo and push to `main` — Pages redeploys automatically. Do not host these from personal GitHub Pages (`<username>.github.io`); a previously flagged account broke this once.
 
 ---
 
@@ -120,21 +120,16 @@ See `screenshot-instructions.txt` for the fastest way to produce these.
 
 ---
 
-## 5. Hosting the privacy policy on GitHub Pages (3 commands)
+## 5. Hosting the privacy and support pages
 
-If you have a GitHub repo for this:
-```bash
-# from the gnbedge repo root, after pushing public/privacy.html
-git checkout --orphan gh-pages
-git rm -rf .
-cp plugin/extension/public/privacy.html .
-git add privacy.html
-git commit -m "privacy policy"
-git push origin gh-pages
-```
-Public URL becomes: `https://<your-github-username>.github.io/<repo>/privacy.html`
+Already done. Privacy + support are served from `GNB-motors/gnbedge-pages` as GitHub Pages:
 
-Alternative — host at `https://app.gnbedge.in/privacy.html` on your existing backend. Either works.
+- Privacy: `https://gnb-motors.github.io/gnbedge-pages/`
+- Support: `https://gnb-motors.github.io/gnbedge-pages/support.html`
+
+To edit: clone `GNB-motors/gnbedge-pages`, modify `index.html` (privacy) or `support.html`, push to `main`. Pages rebuilds in ~1 minute.
+
+Do **not** host these from a personal GitHub account (`<username>.github.io`) — if that account is ever flagged, both URLs become unreachable and CWS rejects the next submission. Keep them under the org.
 
 ---
 
@@ -147,7 +142,7 @@ The host permission `https://fleetedge.home.tatamotors/*` references a Tata Moto
 ## 7. Upload checklist
 
 - [ ] `npm run build` produces a clean `dist/`
-- [ ] `dist/manifest.json` has version `0.0.0.2`, name `gnbedge`, no `tabs` permission, no `localhost` host
+- [ ] `dist/manifest.json` has version `0.0.0.3` (or higher), name `gnbedge`, no `tabs` permission, no `localhost` host, `externally_connectable` lists only prod + dev frontends
 - [ ] `dist/` does NOT contain `vite.svg`, `icons/README.md`, or any `*.map` files
 - [ ] Zip the **contents** of `dist/`, not the folder itself, so `manifest.json` is at the zip root
 - [ ] Privacy policy hosted at a public HTTPS URL

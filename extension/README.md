@@ -308,6 +308,12 @@ Base: `https://api.app.gnbedge.in/api/extension` (configurable; the dev default 
   "permissions": ["storage", "alarms", "notifications"],
   "host_permissions": ["https://api.app.gnbedge.in/*"],
   "optional_host_permissions": ["https://fleetedge.home.tatamotors/*"],
+  "externally_connectable": {
+    "matches": ["https://app.gnbedge.in/*", "https://main-frontend-wine.vercel.app/*"]
+  },
+  "web_accessible_resources": [
+    { "resources": ["icons/icon16.png"], "matches": ["https://app.gnbedge.in/*", "https://main-frontend-wine.vercel.app/*"] }
+  ],
   "background": { "service_worker": "src/background/index.js", "type": "module" },
   "content_scripts": [
     { "matches": ["https://fleetedge.home.tatamotors/*"], "js": ["src/content/networkSpy.js"], "run_at": "document_start", "world": "MAIN" },
@@ -322,7 +328,8 @@ Base: `https://api.app.gnbedge.in/api/extension` (configurable; the dev default 
 | No `scripting` / programmatic injection | Content scripts are declared in `manifest.json`; Chrome injects them. |
 | No `tabs` permission | Reading/reloading the FleetEdge tab works *because* the FleetEdge host is a granted **optional** host permission, not because of a `tabs` permission. |
 | Minimal install-time scope | Only `https://api.app.gnbedge.in/*` is a required host. The FleetEdge intranet host sits in `optional_host_permissions` and is requested at runtime when you click "Connect" — so the install screen never shows it. |
-| Single, disclosed purpose | The extension reads the FleetEdge session token *solely* to relay it to your own organisation's backend — never to a third party. No analytics SDKs. The content script matches one host only. See `privacy.html` / `CWS_SUBMISSION.md`. |
+| Onboarding detection without data exposure | `externally_connectable` whitelists the gnbedge web app (prod + Vercel dev) to send a single `{ type: "PING" }` message; the background responds only with `{ ok: true, version }`. No auth or user data is exposed via this channel. |
+| Single, disclosed purpose | The extension reads the FleetEdge session token *solely* to relay it to your own organisation's backend — never to a third party. No analytics SDKs. The content script matches one host only. See [the privacy policy](https://gnb-motors.github.io/gnbedge-pages/) and `CWS_SUBMISSION.md`. |
 
 ---
 
@@ -443,4 +450,4 @@ For the deeper backend story (encryption, cron cadence, `NO_DATA`/backoff, the `
 
 ## Versioning
 
-This extension follows semantic versioning on the `0.x` line. Every release gets an entry in [`CHANGELOG.md`](./CHANGELOG.md) (`## [YYYY-MM-DD] vX.Y.Z — summary`, Keep-a-Changelog sections). `MINOR` for new capability, `PATCH` for fixes. The `manifest.json` version is the **source of truth** for CWS submissions. `package.json` may drift behind (e.g. `0.0.0.1` vs manifest `0.0.0.2`) — do not bump `manifest.json` outside a CWS submission cycle. No `2.x` release was ever published — older "v2.0.0" references in the codebase describe an architecture milestone, not a shipped version.
+This extension follows semantic versioning on the `0.x` line. Every release gets an entry in [`CHANGELOG.md`](./CHANGELOG.md) (`## [YYYY-MM-DD] vX.Y.Z — summary`, Keep-a-Changelog sections). `MINOR` for new capability, `PATCH` for fixes. The `manifest.json` version is the **source of truth** for CWS submissions. `package.json` may drift behind (e.g. `0.0.0.1` vs manifest `0.0.0.2`) — do not bump `manifest.json` outside a CWS submission cycle. Current shipped version: `0.0.0.3`. No `2.x` release was ever published — older "v2.0.0" references in the codebase describe an architecture milestone, not a shipped version.
