@@ -22,16 +22,10 @@ jobs:
             const number = item.number;
             const labels = item.labels.map(l => l.name);
 
-            // ── Assign based on priority ──
-            let assignees = [];
-            if (labels.includes('priority/P0')) {
-              assignees = ['ItsDevayan']; // Always assign P0 to senior
-            } else if (labels.includes('priority/P1')) {
-              assignees = ['ItsDevayan'];
-            } else if (isPR) {
-              // PRs get CODEOWNERS treatment, but if no one assigned, assign creator
-              assignees = [item.user.login];
-            }
+            // Single-owner setup: ItsDevayan is always the assignee.
+            // CODEOWNERS handles review requests; this keeps the assignee
+            // consistent regardless of who (or what bot) opens the PR/issue.
+            const assignees = ['ItsDevayan'];
 
             if (assignees.length > 0) {
               await github.rest.issues.addAssignees({
