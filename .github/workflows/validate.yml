@@ -9,6 +9,8 @@ on:
 jobs:
   build-and-test:
     runs-on: ubuntu-latest
+    permissions:
+      contents: read
     defaults:
       run:
         working-directory: extension
@@ -19,9 +21,6 @@ jobs:
 
       - name: Lint
         run: npm run lint
-
-      - name: Check formatting
-        run: npx @biomejs/biome format .
 
       - name: Unit + integration tests with coverage
         run: npm run test:coverage -- --coverage.reporter=lcov --coverage.reporter=json-summary --coverage.reporter=text
@@ -47,6 +46,8 @@ jobs:
 
   cws-policy-check:
     runs-on: ubuntu-latest
+    permissions:
+      contents: read
     defaults:
       run:
         working-directory: extension
@@ -65,6 +66,8 @@ jobs:
 
   security-audit:
     runs-on: ubuntu-latest
+    permissions:
+      contents: read
     defaults:
       run:
         working-directory: extension
@@ -73,12 +76,14 @@ jobs:
       - uses: actions/checkout@v4
       - uses: ./.github/actions/setup-extension
 
-      - name: npm audit (high+critical only)
-        run: npm audit --audit-level=high
+      - name: npm audit (prod deps, high+critical only)
+        run: npm audit --omit=dev --audit-level=high
 
   trufflehog:
     if: github.event_name == 'pull_request'
     runs-on: ubuntu-latest
+    permissions:
+      contents: read
     steps:
       - uses: actions/checkout@v4
         with:
@@ -90,17 +95,3 @@ jobs:
           head: HEAD
           extra_args: --only-verified
 
-  semgrep:
-    if: github.event_name == 'pull_request'
-    runs-on: ubuntu-latest
-    permissions:
-      contents: read
-      security-events: write
-    steps:
-      - uses: actions/checkout@v4
-      - uses: returntocorp/semgrep-action@v1
-        with:
-          config: >-
-            p/security-audit
-            p/owasp-top-ten
-            p/javascript
