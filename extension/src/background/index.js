@@ -69,6 +69,14 @@ function invalidateStatusCache() {
   _statusCacheTime = 0;
 }
 
+// ─── TRIGGER_PROCESS cooldown ────────────────────────────────────────────────
+// Rate-limit manual "Pull Now" triggers (RL-1). Stored in module scope so the
+// cooldown persists for the life of the service worker. A second click inside
+// config.TRIGGER_COOLDOWN_MS returns the cached prior result instead of
+// re-hitting the backend.
+let _lastTriggerAt = 0;
+let _lastTriggerResult = null;
+
 // Initialize telemetry
 startTelemetry();
 
@@ -77,9 +85,14 @@ logger.info('FleetEdge Fuel Monitor initialized (CWS-compliant, backend-direct)'
 // ─── Status Polling ──────────────────────────────────────────────────────────
 // Instead of the extension processing tasks, we just poll backend for status.
 
+// Jitter the poll period ±25% so multiple installs in the same org don't
+// hammer the backend (and downstream FleetEdge) on identical minute boundaries
+// — FleetEdge WAF would otherwise fingerprint the exact cadence as automation.
+const _pollBase = config.STATUS_POLL_INTERVAL_MINUTES;
+const _pollPeriodMinutes = _pollBase * (0.75 + Math.random() * 0.5);
 chrome.alarms.create('statusPoll', {
   delayInMinutes: 1,
-  periodInMinutes: config.STATUS_POLL_INTERVAL_MINUTES,
+  periodInMinutes: _pollPeriodMinutes,
 });
 
 chrome.alarms.onAlarm.addListener(async (alarm) => {
@@ -281,6 +294,19 @@ async function handleMessage(message) {
     // ─── Trigger backend processing (optional manual trigger) ──────────
 
     case 'TRIGGER_PROCESS': {
+      // Server-side cooldown: refuse repeat triggers inside TRIGGER_COOLDOWN_MS
+      // so popup-spam (RL-1) can't fan out to backend → FleetEdge WAF.
+      const nowMs = Date.now();
+      const sinceLast = nowMs - _lastTriggerAt;
+      if (sinceLast < config.TRIGGER_COOLDOWN_MS) {
+        const retryInMs = config.TRIGGER_COOLDOWN_MS - sinceLast;
+        taskTel.warn('Manual process trigger rejected (cooldown)', { retryInMs });
+        if (_lastTriggerResult) {
+          return { ..._lastTriggerResult, cached: true, retryInMs };
+        }
+        return { success: false, error: 'cooldown', retryInMs };
+      }
+      _lastTriggerAt = nowMs;
       taskTel.info('Manual process trigger requested');
       try {
         const response = await backendFetch('/fleetedge/process-tasks', { method: 'POST' });
@@ -289,9 +315,12 @@ async function handleMessage(message) {
           tasksProcessed: data.data?.tasksProcessed,
           results: data.data?.results?.length,
         });
-        return { success: true, result: data.data };
+        _lastTriggerResult = { success: true, result: data.data };
+        return _lastTriggerResult;
       } catch (err) {
         taskTel.error('Process trigger failed', { error: err.message });
+        // Don't cache failures — let the next call (after cooldown) retry fresh.
+        _lastTriggerResult = null;
         return { success: false, error: err.message };
       }
     }

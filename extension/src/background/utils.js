@@ -71,27 +71,65 @@ export function sleep(ms) {
 }
 
 /**
+ * HTTP status codes that should NOT trigger an exponential-backoff retry.
+ * - 400/422: malformed request — retrying won't fix it.
+ * - 401/403: auth — must re-link, retry just wastes attempts.
+ * - 404: resource gone — retry is pointless.
+ * - 429: rate-limited — handled specially (Retry-After honored once, then fail).
+ */
+const NO_RETRY_STATUSES = new Set([400, 401, 403, 404, 422, 429]);
+
+/** Cap on how long we'll wait for a server-supplied Retry-After before giving up. */
+const MAX_RETRY_AFTER_MS = 60_000;
+
+/**
  * Retry an async operation with exponential backoff.
- * Max 4 attempts with delays: 1s, 2s, 4s, 8s. Auth errors (401/403) fail immediately.
+ * - 400/401/403/404/422 fail immediately (NO_RETRY_STATUSES).
+ * - 429 fails immediately UNLESS the error carries `retryAfterMs` (set by the
+ *   fetch wrapper from the `Retry-After` response header). In that case we wait
+ *   that long (capped at MAX_RETRY_AFTER_MS) and retry exactly once.
+ * - Other errors: exponential backoff 1s/2s/4s/8s up to MAX_RETRY_ATTEMPTS.
  * @async
  * @param {Function} fn - Async function to execute
  * @param {string} [label='operation'] - Label for logging
  * @returns {Promise<any>} Result from successful fn() call
- * @throws {Error} If all retries exhausted or auth error encountered
+ * @throws {Error} If all retries exhausted or non-retryable status encountered
  * @example
  * await withRetry(() => fetchPendingTasks(), 'fetch tasks')
  */
 export async function withRetry(fn, label = 'operation') {
   const maxAttempts = config.MAX_RETRY_ATTEMPTS;
   let lastErr;
+  let used429Retry = false;
 
   for (let attempt = 1; attempt <= maxAttempts; attempt++) {
     try {
       return await fn();
     } catch (err) {
       lastErr = err;
-      const isAuthError = err.status === 401 || err.status === 403;
-      if (isAuthError || attempt >= maxAttempts) throw err;
+
+      // Special-case 429: honor Retry-After once, then fail.
+      if (err.status === 429) {
+        const retryAfterMs = Number(err.retryAfterMs);
+        if (
+          !used429Retry &&
+          Number.isFinite(retryAfterMs) &&
+          retryAfterMs > 0 &&
+          attempt < maxAttempts
+        ) {
+          used429Retry = true;
+          const wait = Math.min(retryAfterMs, MAX_RETRY_AFTER_MS);
+          logger.warn(
+            `${label} rate-limited (429), honoring Retry-After ${wait}ms then retrying once`
+          );
+          await sleep(wait);
+          continue;
+        }
+        // No Retry-After header (or already used our 429 retry) → fail fast.
+        throw err;
+      }
+
+      if (NO_RETRY_STATUSES.has(err.status) || attempt >= maxAttempts) throw err;
 
       const delay = Math.min(1000 * 2 ** (attempt - 1), 8000);
       logger.warn(
