@@ -15,8 +15,29 @@ const fs = require('fs');
 const path = require('path');
 
 const DIST = path.resolve(__dirname, '..', 'dist');
-const API = process.env.LEMU_API_URL || 'http://localhost:3000';
+const API = process.env.LEMU_INGEST_URL || process.env.LEMU_API_URL || 'http://localhost:3000';
 const TOKEN = process.env.LEMU_AUTH_TOKEN || '';
+
+// Refuse to run if endpoint is plain HTTP and host isn't a loopback dev address.
+(function assertSafeEndpoint() {
+  let parsed;
+  try {
+    parsed = new URL(API);
+  } catch {
+    throw new Error(
+      `[upload-sourcemaps] LEMU_INGEST_URL is not a valid URL: "${API}". Set LEMU_INGEST_URL to an https:// endpoint.`
+    );
+  }
+  if (parsed.protocol === 'http:') {
+    const host = parsed.hostname;
+    const isLoopback = host === 'localhost' || host === '127.0.0.1' || host === '::1';
+    if (!isLoopback) {
+      throw new Error(
+        `[upload-sourcemaps] Refusing to upload source maps over plaintext HTTP to non-loopback host "${host}". LEMU_INGEST_URL must be https:// (or http://localhost for dev).`
+      );
+    }
+  }
+})();
 
 // Read version from manifest or package.json
 function getVersion() {
@@ -61,6 +82,7 @@ async function upload() {
   const headers = { 'Content-Type': 'application/json' };
   if (TOKEN) headers['Authorization'] = `Bearer ${TOKEN}`;
 
+  let uploadOk = false;
   try {
     const resp = await fetch(`${API}/api/extension/telemetry/sourcemaps`, {
       method: 'POST',
@@ -69,23 +91,38 @@ async function upload() {
     });
 
     if (resp.ok) {
-      const data = await resp.json();
-      console.log(
-        `[upload-sourcemaps] ✅ Uploaded ${data.stored || maps.length} maps for v${version}`
-      );
+      uploadOk = true;
+      let stored = maps.length;
+      try {
+        const data = await resp.json();
+        stored = data.stored || maps.length;
+      } catch {
+        // Non-JSON 2xx is still success
+      }
+      console.log(`[upload-sourcemaps] ✅ Uploaded ${stored} maps for v${version}`);
     } else {
-      console.warn(`[upload-sourcemaps] ⚠️  Upload failed: ${resp.status} ${resp.statusText}`);
+      console.error(`[upload-sourcemaps] ❌ Upload failed: ${resp.status} ${resp.statusText}`);
+      process.exitCode = 1;
     }
   } catch (err) {
-    console.warn(`[upload-sourcemaps] ⚠️  Could not reach backend: ${err.message}`);
-    console.warn('[upload-sourcemaps] Source maps saved locally in dist/ — upload manually later.');
+    console.error(`[upload-sourcemaps] ❌ Could not reach backend: ${err.message}`);
+    console.error('[upload-sourcemaps] Source maps preserved in dist/ — upload manually later.');
+    process.exitCode = 1;
   }
 
-  // Remove .map files from dist so they don't ship in the extension zip
-  for (const mapPath of maps) {
-    fs.unlinkSync(mapPath);
+  if (uploadOk) {
+    // Only delete .map files if the backend confirmed receipt; otherwise the
+    // build's only symbol info would be lost forever.
+    for (const mapPath of maps) {
+      fs.unlinkSync(mapPath);
+    }
+    console.log(`[upload-sourcemaps] Cleaned ${maps.length} .map file(s) from dist/`);
+  } else {
+    console.warn('[upload-sourcemaps] Skipping .map cleanup because upload did not succeed.');
   }
-  console.log(`[upload-sourcemaps] Cleaned ${maps.length} .map file(s) from dist/`);
 }
 
-upload();
+upload().catch((err) => {
+  console.error('[upload-sourcemaps] Unexpected error:', err.message);
+  process.exitCode = 1;
+});
