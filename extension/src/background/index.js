@@ -18,6 +18,7 @@ import {
   disconnectFleetEdgeAccount,
   reconnectFleetEdgeAccount,
   renameFleetEdgeAccount,
+  resetNotifiedAccounts,
 } from './fleetedgeLink.js';
 import { getStorage, setStorage, removeStorage } from './utils.js';
 import { getLogs, clearLogs, createLogger } from './logger.js';
@@ -251,7 +252,8 @@ async function handleMessage(message) {
     case 'CONNECT_FLEETEDGE': {
       tlog.info('FleetEdge connect requested');
       invalidateStatusCache();
-      const result = await connectFleetEdge();
+      // G-1: pass tabId if popup supplied one from the tab picker (second-pass connect).
+      const result = await connectFleetEdge({ tabId: message.tabId || null });
       return result;
     }
 
@@ -340,7 +342,10 @@ async function handleMessage(message) {
     // ─── Data Management ───────────────────────────────────────────────
 
     case 'CLEAR_ALL': {
-      // Disconnect FleetEdge on backend
+      // G-3: Remove the full explicit set of storage keys so no residue is
+      // left when a shared Chrome profile switches users. Using an explicit
+      // list is intentional — safer than a runtime enumerate-and-clear approach.
+      // Disconnect FleetEdge on backend (best-effort — proceed even if it fails).
       try {
         await disconnectFleetEdge();
       } catch {
@@ -349,14 +354,21 @@ async function handleMessage(message) {
 
       invalidateStatusCache();
 
+      // G-3: Reset in-memory notification set so the next user's session starts clean.
+      resetNotifiedAccounts();
+
       await removeStorage([
         'authToken',
         'authUser',
         'backendUrl',
         'fleetEdgeAccounts',
         'fleetEdgePull',
+        'fleetEdgeStatus',
         'metrics',
+        '_lastTriggerAt',
       ]);
+      // G-3: Explicitly clear badge text (disconnectFleetEdge may not run if backend
+      // call fails, so we force-clear here).
       chrome.action.setBadgeText({ text: '' });
       logger.info('All data cleared');
       return { success: true };

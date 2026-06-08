@@ -677,6 +677,9 @@ export default function Popup() {
   const [logs, setLogs] = useState([]);
   const [toast, setToast] = useState(null);
   const [confirming, setConfirming] = useState(null);
+  // G-1: tab picker state — set when background returns needsTabPick:true
+  const [tabPicker, setTabPicker] = useState(null); // { choices: [{tabId, fleetId, displayName}] }
+  const [tabPickerSelected, setTabPickerSelected] = useState(null);
   const [dismissedBanners, setDismissedBanners] = useState(new Set());
   const [loginLoading, setLoginLoading] = useState(false);
   const [loginError, setLoginError] = useState('');
@@ -773,10 +776,19 @@ export default function Popup() {
               break;
             }
             showToast('Connecting to FleetEdge…');
-            const res = await chrome.runtime.sendMessage({ type: 'CONNECT_FLEETEDGE' });
+            // G-1: pass tabId if user already chose a tab from the picker.
+            const connectMsg = { type: 'CONNECT_FLEETEDGE' };
+            if (payload?.tabId) connectMsg.tabId = payload.tabId;
+            const res = await chrome.runtime.sendMessage(connectMsg);
             if (res.success) {
+              setTabPicker(null);
+              setTabPickerSelected(null);
               showToast(`Connected ✓ (${res.vehicleCount ?? 0} vehicles)`, 'ok');
               await refreshStatus();
+            } else if (res.needsTabPick) {
+              // G-1: Background found multiple tabs — surface a chooser modal.
+              setTabPicker({ choices: res.choices || [] });
+              setTabPickerSelected(res.choices?.[0]?.tabId ?? null);
             } else {
               showToast(res.error || 'Connection failed', 'err');
             }
@@ -1080,6 +1092,39 @@ export default function Popup() {
           }}
           onCancel={() => setConfirming(null)}
         />
+      )}
+      {/* G-1: Tab picker — shown when multiple FleetEdge tabs are open */}
+      {tabPicker && (
+        <div className="gnb-modal-backdrop" onClick={() => setTabPicker(null)}>
+          <div className="gnb-modal" onClick={(e) => e.stopPropagation()}>
+            <h3>Connect which FleetEdge tab?</h3>
+            <p>Multiple FleetEdge tabs are open. Choose the account to connect:</p>
+            <div style={{ display: 'flex', flexDirection: 'column', gap: 6, margin: '10px 0' }}>
+              {tabPicker.choices.map((c) => (
+                <label key={c.tabId} style={{ display: 'flex', alignItems: 'center', gap: 8, cursor: 'pointer' }}>
+                  <input
+                    type="radio"
+                    name="tabPick"
+                    value={c.tabId}
+                    checked={tabPickerSelected === c.tabId}
+                    onChange={() => setTabPickerSelected(c.tabId)}
+                  />
+                  <span>{c.displayName}{c.fleetId && c.displayName !== c.fleetId ? ` (${c.fleetId})` : ''}</span>
+                </label>
+              ))}
+            </div>
+            <div className="gnb-modal-actions">
+              <button className="gnb-btn ghost sm" onClick={() => setTabPicker(null)}>Cancel</button>
+              <button
+                className="gnb-btn primary sm"
+                disabled={!tabPickerSelected}
+                onClick={() => onAction('connectAccount', { tabId: tabPickerSelected })}
+              >
+                Connect
+              </button>
+            </div>
+          </div>
+        </div>
       )}
     </div>
   );

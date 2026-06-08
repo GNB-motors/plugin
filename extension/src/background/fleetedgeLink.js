@@ -93,31 +93,11 @@ function notifyExpiredAccounts(accounts) {
   }
 }
 
-async function captureTabToken() {
-  const hasPermission = await chrome.permissions.contains({
-    origins: ['https://fleetedge.home.tatamotors/*'],
-  });
-  if (!hasPermission) {
-    return {
-      success: false,
-      error: 'Fleet portal access not yet allowed — click Connect to grant permission first',
-    };
-  }
-
-  const tabs = await chrome.tabs.query({ url: 'https://fleetedge.home.tatamotors/*' });
-  if (!tabs.length) {
-    tokenTel.warn('No FleetEdge tab found');
-    return {
-      success: false,
-      error: 'No FleetEdge tab open — please open FleetEdge and log in first',
-    };
-  }
-
-  const tab =
-    tabs.length > 1
-      ? tabs.sort((a, b) => (b.lastAccessed || 0) - (a.lastAccessed || 0))[0]
-      : tabs[0];
-
+/**
+ * Read the FleetEdge token from a single tab, handling content-script retry.
+ * Returns { success, token, fleetId, exp, foundIn, ... } or { success: false, error }.
+ */
+async function readTokenFromTab(tab) {
   let tokenResult;
   try {
     tokenResult = await chrome.tabs.sendMessage(tab.id, { type: 'READ_FLEETEDGE_TOKEN' });
@@ -158,6 +138,102 @@ async function captureTabToken() {
     };
   }
 
+  return { success: true, ...tokenResult };
+}
+
+/**
+ * Capture a token from open FleetEdge tabs.
+ *
+ * G-1: On fresh connect (no targetTabId), if multiple tabs are open, return a
+ * picker payload so the popup can let the user choose — option (a). Each
+ * candidate is decoded to surface the account name without guessing which tab
+ * to use. If targetTabId is provided (second call after picker), read only that
+ * exact tab.
+ */
+async function captureTabToken({ targetTabId = null, expectedFleetId = null } = {}) {
+  const hasPermission = await chrome.permissions.contains({
+    origins: ['https://fleetedge.home.tatamotors/*'],
+  });
+  if (!hasPermission) {
+    return {
+      success: false,
+      error: 'Fleet portal access not yet allowed — click Connect to grant permission first',
+    };
+  }
+
+  const tabs = await chrome.tabs.query({ url: 'https://fleetedge.home.tatamotors/*' });
+  if (!tabs.length) {
+    tokenTel.warn('No FleetEdge tab found');
+    return {
+      success: false,
+      error: 'No FleetEdge tab open — please open FleetEdge and log in first',
+    };
+  }
+
+  // G-1: If caller specified a tab (picker result) use it directly.
+  // Otherwise, if >1 tab open and this is a fresh connect, return choices.
+  if (!targetTabId && !expectedFleetId && tabs.length > 1) {
+    // Decode each tab's JWT to build a picker list (best-effort; tabs that fail are included with null name).
+    const choices = await Promise.all(
+      tabs.map(async (t) => {
+        try {
+          const res = await chrome.tabs.sendMessage(t.id, { type: 'READ_FLEETEDGE_TOKEN' });
+          if (res && res.success) {
+            const payload = decodeJwtPayloadUnsafe(res.token);
+            const name = payload?.name || payload?.sub || null;
+            return { tabId: t.id, fleetId: res.fleetId || null, displayName: name || res.fleetId || `Tab ${t.id}` };
+          }
+        } catch {
+          /* tab not ready — include as unknown */
+        }
+        return { tabId: t.id, fleetId: null, displayName: `Tab ${t.id}` };
+      })
+    );
+    tokenTel.warn('Multiple FleetEdge tabs — returning picker', { count: tabs.length });
+    // Return structured picker response; popup will re-invoke with { tabId }.
+    return { success: false, needsTabPick: true, choices };
+  }
+
+  // Resolve the single tab to use.
+  let tab;
+  if (targetTabId) {
+    tab = tabs.find((t) => t.id === targetTabId);
+    if (!tab) {
+      return { success: false, error: 'Selected tab no longer open — please try again' };
+    }
+  } else if (tabs.length === 1) {
+    tab = tabs[0];
+  } else {
+    // expectedFleetId is set (reconnect path) — fall back to most-recent; H-3 guard below handles mismatch.
+    tab = tabs.sort((a, b) => (b.lastAccessed || 0) - (a.lastAccessed || 0))[0];
+  }
+
+  const tokenResult = await readTokenFromTab(tab);
+  if (!tokenResult.success) return tokenResult;
+
+  // G-2: Defensive fleet_id match — refuse if the tab's JWT owner doesn't match
+  // the connect/reconnect intent. Guards against silently cross-linking accounts.
+  if (expectedFleetId) {
+    const payload = decodeJwtPayloadUnsafe(tokenResult.token);
+    const claimFleetId =
+      payload && (payload.fleet_id || payload.fleetId)
+        ? String(payload.fleet_id || payload.fleetId)
+        : null;
+    const tokenFleetId = claimFleetId || (tokenResult.fleetId ? String(tokenResult.fleetId) : null);
+    if (tokenFleetId && String(expectedFleetId) !== tokenFleetId) {
+      tokenTel.warn('Tab JWT fleet_id mismatch — refusing token read', {
+        expectedFleetId: String(expectedFleetId),
+        tokenFleetId,
+        tabId: tab.id,
+      });
+      return {
+        success: false,
+        error:
+          'FleetEdge tab is logged into a different account — switch FleetEdge to the account you want to reconnect and try again',
+      };
+    }
+  }
+
   tokenTel.info('Token read from content script', {
     foundIn: tokenResult.foundIn,
     fleetId: tokenResult.fleetId,
@@ -189,26 +265,33 @@ async function captureTabToken() {
 
 /**
  * Connect a new FleetEdge account (captures token from open tab, links to backend).
+ * opts.tabId — if provided, skip the tab picker and read this specific tab (G-1 second pass).
  */
 export async function connectFleetEdge(opts = {}) {
   return withLinkLock(() => _connectFleetEdgeInner(opts));
 }
 
-async function _connectFleetEdgeInner({ expectedFleetId = null, expectedAccountId = null } = {}) {
+async function _connectFleetEdgeInner({ expectedFleetId = null, expectedAccountId = null, tabId = null } = {}) {
   logger.info('Connecting to FleetEdge...');
   feTel.perfStart('connect');
 
-  const captured = await captureTabToken();
+  const captured = await captureTabToken({ targetTabId: tabId, expectedFleetId });
+
+  // G-1: Propagate the multi-tab picker response up to the popup unchanged.
+  if (!captured.success && captured.needsTabPick) {
+    feTel.perfEnd('connect');
+    return captured;
+  }
+
   if (!captured.success) {
     feTel.perfEnd('connect');
     return captured;
   }
 
   // H-3: For reconnect flows we know which stored account the user is targeting.
-  // Decode the captured token's payload and refuse if the owner claim
-  // (fleet_id) doesn't match the requested account's stored fleetId — otherwise
-  // we'd silently rebind a different FleetEdge user's token onto this row.
-  if (expectedFleetId) {
+  // captureTabToken already enforced the expectedFleetId match for the tab read,
+  // but double-check here for belt-and-suspenders when the tab picker was used.
+  if (expectedFleetId && !tabId) {
     const payload = decodeJwtPayloadUnsafe(captured.token);
     const claimFleetId =
       payload && (payload.fleet_id || payload.fleetId)
@@ -319,6 +402,14 @@ export async function disconnectFleetEdgeAccount(accountId) {
  */
 export async function disconnectFleetEdge() {
   return disconnectFleetEdgeAccount(null);
+}
+
+/**
+ * Reset in-memory notification tracking (called by CLEAR_ALL so a new session
+ * doesn't suppress notifications for the next user on this Chrome profile).
+ */
+export function resetNotifiedAccounts() {
+  _notifiedExpiredAccounts.clear();
 }
 
 /**
