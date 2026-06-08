@@ -134,12 +134,38 @@ export async function backendFetch(path, options = {}) {
   if (!response.ok) {
     const body = await response.json().catch(() => ({}));
     bTel.error(`Backend ${options.method || 'GET'} ${path} failed`, { status: response.status });
-    throw new Error(
+    const err = new Error(
       body.message || `Backend ${options.method || 'GET'} ${path} failed: ${response.status}`
     );
+    err.status = response.status;
+    // Parse Retry-After (seconds-as-integer per RFC 7231; HTTP-date form also
+    // supported) so withRetry can honor 429 backpressure once before failing.
+    if (response.status === 429) {
+      const raw = response.headers?.get?.('Retry-After');
+      const ms = parseRetryAfter(raw);
+      if (ms != null) err.retryAfterMs = ms;
+    }
+    throw err;
   }
 
   return response;
+}
+
+/**
+ * Parse a Retry-After header value into milliseconds.
+ * Accepts integer seconds ("60") or HTTP-date. Returns null if unparseable.
+ */
+function parseRetryAfter(value) {
+  if (!value) return null;
+  const trimmed = String(value).trim();
+  if (/^\d+$/.test(trimmed)) {
+    return Number(trimmed) * 1000;
+  }
+  const dateMs = Date.parse(trimmed);
+  if (!Number.isNaN(dateMs)) {
+    return Math.max(0, dateMs - Date.now());
+  }
+  return null;
 }
 
 // ─── Status APIs ─────────────────────────────────────────────────────────────

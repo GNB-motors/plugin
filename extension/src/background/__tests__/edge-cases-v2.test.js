@@ -1066,6 +1066,7 @@ describe('index.js — v2 improvements (handleMessage logic)', () => {
         TELEMETRY_HEALTH_CHECK_INTERVAL_MS: 300000,
         TELEMETRY_MIN_SEVERITY: 'DEBUG',
         FETCH_TIMEOUT_MS: 15000,
+        TRIGGER_COOLDOWN_MS: 30_000,
       },
     }));
 
@@ -1245,6 +1246,41 @@ describe('index.js — v2 improvements (handleMessage logic)', () => {
     expect(spies.backendFetch).toHaveBeenCalledWith('/fleetedge/process-tasks', { method: 'POST' });
   });
 
+  it('TRIGGER_PROCESS enforces cooldown — second call within window is rejected', async () => {
+    const { sendMessage, spies } = await setupIndex({
+      store: { authToken: 'jwt-123' },
+    });
+
+    const first = await sendMessage({ type: 'TRIGGER_PROCESS' });
+    expect(first.success).toBe(true);
+    expect(spies.backendFetch).toHaveBeenCalledTimes(1);
+
+    // Immediate second call: still in cooldown.
+    const second = await sendMessage({ type: 'TRIGGER_PROCESS' });
+    expect(second.cached).toBe(true);
+    expect(second.retryInMs).toBeGreaterThan(0);
+    // Backend was NOT hit again.
+    expect(spies.backendFetch).toHaveBeenCalledTimes(1);
+  });
+
+  it('TRIGGER_PROCESS cooldown without prior success returns error shape', async () => {
+    const { sendMessage, spies } = await setupIndex({
+      store: { authToken: 'jwt-123' },
+    });
+    // First call fails — _lastTriggerAt still bumped, _lastTriggerResult null.
+    spies.backendFetch.mockImplementationOnce(() => Promise.reject(new Error('boom')));
+
+    const first = await sendMessage({ type: 'TRIGGER_PROCESS' });
+    expect(first.success).toBe(false);
+
+    // Second call is inside cooldown with no cached success → cooldown error.
+    const second = await sendMessage({ type: 'TRIGGER_PROCESS' });
+    expect(second.success).toBe(false);
+    expect(second.error).toBe('cooldown');
+    expect(second.retryInMs).toBeGreaterThan(0);
+    expect(spies.backendFetch).toHaveBeenCalledTimes(1);
+  });
+
   // ── Cache invalidation ──────────────────────────────────────────────────────
 
   it('DISCONNECT_FLEETEDGE invalidates status cache', async () => {
@@ -1292,13 +1328,28 @@ describe('index.js — v2 improvements (handleMessage logic)', () => {
 
   // ── Status polling uses config ──────────────────────────────────────────────
 
-  it('statusPoll alarm uses config.STATUS_POLL_INTERVAL_MINUTES', async () => {
+  it('statusPoll alarm uses jittered config.STATUS_POLL_INTERVAL_MINUTES', async () => {
     await setupIndex();
 
-    expect(chrome.alarms.create).toHaveBeenCalledWith('statusPoll', {
-      delayInMinutes: 1,
-      periodInMinutes: 2,
-    });
+    // Period is jittered ±25% around the base of 2 min (RL-3 bot-detection fix)
+    const call = chrome.alarms.create.mock.calls.find((c) => c[0] === 'statusPoll');
+    expect(call).toBeDefined();
+    expect(call[1].delayInMinutes).toBe(1);
+    expect(call[1].periodInMinutes).toBeGreaterThanOrEqual(2 * 0.75);
+    expect(call[1].periodInMinutes).toBeLessThanOrEqual(2 * 1.25);
+  });
+
+  it('statusPoll alarm period varies across invocations (jitter)', async () => {
+    const periods = new Set();
+    for (let i = 0; i < 8; i++) {
+      vi.resetModules();
+      await setupIndex();
+      const call = chrome.alarms.create.mock.calls.find((c) => c[0] === 'statusPoll');
+      periods.add(call[1].periodInMinutes);
+    }
+    // 8 invocations should produce more than 1 unique period
+    // (Math.random collision odds ≈ 1/2^53 per pair).
+    expect(periods.size).toBeGreaterThan(1);
   });
 
   // ── Unknown message type ────────────────────────────────────────────────────
