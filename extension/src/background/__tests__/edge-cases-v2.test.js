@@ -788,6 +788,11 @@ describe('index.js — v2 improvements (handleMessage logic)', () => {
       connectFleetEdge: connectFleetEdgeSpy,
       getFleetEdgeStatus: getFleetEdgeStatusSpy,
       disconnectFleetEdge: disconnectFleetEdgeSpy,
+      disconnectFleetEdgeAccount: vi.fn(() => Promise.resolve({ success: true })),
+      reconnectFleetEdgeAccount: vi.fn(() => Promise.resolve({ success: true })),
+      renameFleetEdgeAccount: vi.fn(() => Promise.resolve({ success: true })),
+      resetNotifiedAccounts: vi.fn(),
+      withLinkLock: vi.fn((fn) => fn()),
     }));
 
     vi.doMock('../logger.js', () => ({
@@ -1072,5 +1077,338 @@ describe('index.js — v2 improvements (handleMessage logic)', () => {
     const messageHandler = chrome.runtime.onMessage.addListener.mock.calls[0]?.[0];
     const result = messageHandler({ type: 'READ_FLEETEDGE_TOKEN' }, {}, vi.fn());
     expect(result).toBe(false);
+  });
+
+  // ── G-3: CLEAR_ALL removes full key set, resets in-memory state ──────────────
+
+  it('CLEAR_ALL removes all explicit storage keys and clears badge', async () => {
+    const { sendMessage, STORE, actionCalls } = await setupIndex({
+      store: {
+        authToken: 'jwt',
+        authUser: { name: 'T' },
+        backendUrl: 'https://api.example.com',
+        fleetEdgeAccounts: [{ accountId: 'a1' }],
+        fleetEdgePull: { lastRunAt: '2026-01-01' },
+        fleetEdgeStatus: { cached: true },
+        metrics: { pending: 5 },
+        _lastTriggerAt: 999,
+      },
+    });
+
+    await sendMessage({ type: 'CLEAR_ALL' });
+
+    // All explicit keys must be gone
+    expect(STORE.authToken).toBeUndefined();
+    expect(STORE.authUser).toBeUndefined();
+    expect(STORE.backendUrl).toBeUndefined();
+    expect(STORE.fleetEdgeAccounts).toBeUndefined();
+    expect(STORE.fleetEdgePull).toBeUndefined();
+    expect(STORE.fleetEdgeStatus).toBeUndefined();
+    expect(STORE.metrics).toBeUndefined();
+    expect(STORE._lastTriggerAt).toBeUndefined();
+    // Badge must be cleared
+    expect(actionCalls.some((c) => c.badge === '')).toBe(true);
+  });
+
+  it('CLEAR_ALL calls resetNotifiedAccounts to wipe in-memory set', async () => {
+    vi.restoreAllMocks();
+    vi.resetModules();
+
+    const STORE = { authToken: 'jwt' };
+    const actionCalls = [];
+    const resetNotifiedAccountsSpy = vi.fn();
+
+    vi.stubGlobal('chrome', {
+      storage: {
+        local: {
+          get: vi.fn((keys) => {
+            const result = {};
+            (Array.isArray(keys) ? keys : [keys]).forEach((k) => {
+              if (k in STORE) result[k] = STORE[k];
+            });
+            return Promise.resolve(result);
+          }),
+          set: vi.fn((obj) => { Object.assign(STORE, obj); return Promise.resolve(); }),
+          remove: vi.fn((keys) => {
+            (Array.isArray(keys) ? keys : [keys]).forEach((k) => delete STORE[k]);
+            return Promise.resolve();
+          }),
+        },
+      },
+      alarms: { create: vi.fn(), onAlarm: { addListener: vi.fn() } },
+      action: {
+        setBadgeText: vi.fn((o) => actionCalls.push({ badge: o.text })),
+        setBadgeBackgroundColor: vi.fn(),
+      },
+      runtime: {
+        onMessage: { addListener: vi.fn() },
+        onMessageExternal: { addListener: vi.fn() },
+        onInstalled: { addListener: vi.fn() },
+        getManifest: vi.fn(() => ({ version: '2.0.0' })),
+      },
+      tabs: { query: vi.fn(() => Promise.resolve([])), sendMessage: vi.fn() },
+      notifications: { create: vi.fn() },
+    });
+
+    vi.doMock('../fleetedgeLink.js', () => ({
+      connectFleetEdge: vi.fn(() => Promise.resolve({ success: true })),
+      getFleetEdgeStatus: vi.fn(() => Promise.resolve({ accounts: [], pull: {} })),
+      disconnectFleetEdge: vi.fn(() => Promise.resolve({ success: true })),
+      disconnectFleetEdgeAccount: vi.fn(() => Promise.resolve({ success: true })),
+      reconnectFleetEdgeAccount: vi.fn(() => Promise.resolve({ success: true })),
+      renameFleetEdgeAccount: vi.fn(() => Promise.resolve({ success: true })),
+      resetNotifiedAccounts: resetNotifiedAccountsSpy,
+      withLinkLock: vi.fn((fn) => fn()),
+    }));
+
+    vi.doMock('../logger.js', () => ({
+      createLogger: () => ({ info: vi.fn(), warn: vi.fn(), error: vi.fn(), debug: vi.fn() }),
+      getLogs: vi.fn(() => Promise.resolve([])),
+      clearLogs: vi.fn(() => Promise.resolve()),
+    }));
+
+    vi.doMock('../config.js', () => ({
+      config: {
+        BACKEND_BASE_URL: 'http://localhost:3000',
+        API_PREFIX: '/api/extension',
+        STATUS_POLL_INTERVAL_MINUTES: 2,
+        TELEMETRY_ENABLED: true,
+        TELEMETRY_MAX_EVENTS: 100,
+        TELEMETRY_FLUSH_INTERVAL_MS: 5000,
+        TELEMETRY_SHIP_TO_BACKEND: false,
+        TELEMETRY_SHIP_INTERVAL_MS: 60000,
+        TELEMETRY_HEALTH_CHECK_INTERVAL_MS: 300000,
+        TELEMETRY_MIN_SEVERITY: 'DEBUG',
+        FETCH_TIMEOUT_MS: 15000,
+      },
+    }));
+
+    vi.doMock('../backendApi.js', () => ({
+      login: vi.fn(),
+      logout: vi.fn(() => Promise.resolve()),
+      isAuthenticated: vi.fn(() => Promise.resolve(false)),
+      backendFetch: vi.fn(() => Promise.resolve({ ok: true, json: () => Promise.resolve({ data: {} }) })),
+      fetchStatus: vi.fn(() => Promise.resolve({ data: {} })),
+    }));
+
+    vi.doMock('../telemetry.js', () => {
+      const makeMethod = () => vi.fn();
+      const createLayerLogger = () => ({
+        debug: makeMethod(), info: makeMethod(), warn: makeMethod(),
+        error: makeMethod(), fatal: makeMethod(), perfStart: vi.fn(), perfEnd: vi.fn(),
+      });
+      return {
+        startTelemetry: vi.fn(),
+        record: vi.fn(),
+        LAYERS: { UI: 'UI', MESSAGE: 'MESSAGE', BACKEND: 'BACKEND', FLEETEDGE: 'FLEETEDGE', STORAGE: 'STORAGE', TOKEN: 'TOKEN', TASK: 'TASK' },
+        SEVERITY: { DEBUG: 0, INFO: 1, WARN: 2, ERROR: 3, FATAL: 4 },
+        createLayerLogger,
+        getEvents: vi.fn(() => Promise.resolve([])),
+        clearEvents: vi.fn(() => Promise.resolve()),
+        getStats: vi.fn(() => Promise.resolve({})),
+        getHealthSnapshot: vi.fn(() => Promise.resolve({})),
+        getBreadcrumbs: vi.fn(() => []),
+      };
+    });
+
+    await import('../index.js');
+    const messageHandler = chrome.runtime.onMessage.addListener.mock.calls[0]?.[0];
+    const sendMessage = (msg) => new Promise((resolve) => {
+      const result = messageHandler(msg, {}, resolve);
+      if (result === false) resolve(undefined);
+    });
+
+    await sendMessage({ type: 'CLEAR_ALL' });
+    expect(resetNotifiedAccountsSpy).toHaveBeenCalled();
+  });
+});
+
+// ═══════════════════════════════════════════════════════════════════════════════
+// G-1 / G-2: fleetedgeLink multi-tab picker and fleet_id mismatch guard
+// ═══════════════════════════════════════════════════════════════════════════════
+
+describe('fleetedgeLink — G-1 multi-tab picker and G-2 fleet_id guard', () => {
+  beforeEach(() => {
+    vi.restoreAllMocks();
+    vi.resetModules();
+  });
+
+  function makeStore() {
+    const store = {};
+    return {
+      store,
+      chromeMock: {
+        storage: {
+          local: {
+            get: vi.fn((keys) => {
+              const result = {};
+              (Array.isArray(keys) ? keys : [keys]).forEach((k) => {
+                if (k in store) result[k] = store[k];
+              });
+              return Promise.resolve(result);
+            }),
+            set: vi.fn((obj) => { Object.assign(store, obj); return Promise.resolve(); }),
+            remove: vi.fn(() => Promise.resolve()),
+          },
+        },
+        tabs: {
+          query: vi.fn(() => Promise.resolve([])),
+          sendMessage: vi.fn(),
+          reload: vi.fn(() => Promise.resolve()),
+        },
+        permissions: { contains: vi.fn(() => Promise.resolve(true)) },
+        action: { setBadgeText: vi.fn(), setBadgeBackgroundColor: vi.fn() },
+        notifications: { create: vi.fn() },
+      },
+    };
+  }
+
+  async function setupLink(opts = {}) {
+    // Explicitly unregister any doMock from prior describe blocks — vi.resetModules() only
+    // clears the instance cache, not the factory registry. Without this, the fleetedgeLink.js
+    // mock set up by setupIndex (in the index.js describe block) leaks into these tests.
+    vi.doUnmock('../fleetedgeLink.js');
+
+    const { chromeMock, store } = makeStore();
+    if (opts.tabsResult) chromeMock.tabs.query = vi.fn(() => Promise.resolve(opts.tabsResult));
+    // Wrap sendMessageImpl as vi.fn() so it's properly tracked and restoreable.
+    if (opts.sendMessageImpl) {
+      chromeMock.tabs.sendMessage = vi.fn(opts.sendMessageImpl);
+    } else if (opts.sendMessageResult !== undefined) {
+      chromeMock.tabs.sendMessage = vi.fn(() => Promise.resolve(opts.sendMessageResult));
+    }
+    vi.stubGlobal('chrome', chromeMock);
+
+    const telemetryCalls = [];
+    vi.doMock('../telemetry.js', () => ({
+      createLayerLogger: (layer) => {
+        const makeMethod = (sev) => (msg, extra) => telemetryCalls.push({ layer, sev, msg, extra });
+        return { debug: makeMethod('DEBUG'), info: makeMethod('INFO'), warn: makeMethod('WARN'), error: makeMethod('ERROR'), fatal: makeMethod('FATAL'), perfStart: vi.fn(), perfEnd: vi.fn() };
+      },
+      LAYERS: { UI: 'UI', MESSAGE: 'MESSAGE', BACKEND: 'BACKEND', FLEETEDGE: 'FLEETEDGE', STORAGE: 'STORAGE', TOKEN: 'TOKEN', TASK: 'TASK' },
+    }));
+    vi.doMock('../logger.js', () => ({
+      createLogger: () => ({ info: vi.fn(), warn: vi.fn(), error: vi.fn(), debug: vi.fn() }),
+    }));
+    vi.doMock('../config.js', () => ({
+      config: { BACKEND_BASE_URL: 'http://localhost:3000', API_PREFIX: '/api/extension' },
+    }));
+    vi.doMock('../backendApi.js', () => ({
+      backendFetch: opts.backendFetch || vi.fn(() => Promise.resolve({
+        json: () => Promise.resolve({ data: { vehicleCount: 1 } }),
+      })),
+    }));
+
+    const mod = await import('../fleetedgeLink.js');
+    return { mod, chromeMock, store, telemetryCalls };
+  }
+
+  // ── G-1: multi-tab picker ───────────────────────────────────────────────────
+
+  it('G-1: fresh connect with 2 tabs returns needsTabPick with choices', async () => {
+    // Build a JWT with fleet_id claim for tab 1.
+    // payload: { fleet_id: 'FA1', name: 'Alice' }
+    const payloadA = btoa(JSON.stringify({ fleet_id: 'FA1', name: 'Alice', exp: 9999999999 }))
+      .replace(/\+/g, '-').replace(/\//g, '_').replace(/=/g, '');
+    const jwtA = `eyJhbGciOiJSUzI1NiJ9.${payloadA}.sig`;
+
+    const payloadB = btoa(JSON.stringify({ fleet_id: 'FB2', name: 'Bob', exp: 9999999999 }))
+      .replace(/\+/g, '-').replace(/\//g, '_').replace(/=/g, '');
+    const jwtB = `eyJhbGciOiJSUzI1NiJ9.${payloadB}.sig`;
+
+    const { mod } = await setupLink({
+      tabsResult: [{ id: 10 }, { id: 20 }],
+      sendMessageImpl: vi.fn().mockImplementation((_tabId) => {
+        if (_tabId === 10) return Promise.resolve({ success: true, token: jwtA, fleetId: 'FA1', exp: 9999999999, foundIn: 'ls' });
+        return Promise.resolve({ success: true, token: jwtB, fleetId: 'FB2', exp: 9999999999, foundIn: 'ls' });
+      }),
+    });
+
+    const result = await mod.connectFleetEdge();
+
+    expect(result.success).toBe(false);
+    expect(result.needsTabPick).toBe(true);
+    expect(result.choices).toHaveLength(2);
+    expect(result.choices.find((c) => c.tabId === 10)).toBeDefined();
+    expect(result.choices.find((c) => c.tabId === 20)).toBeDefined();
+    // displayName should be decoded from JWT
+    expect(result.choices.find((c) => c.tabId === 10).displayName).toBe('Alice');
+    expect(result.choices.find((c) => c.tabId === 20).displayName).toBe('Bob');
+  });
+
+  it('G-1: single tab does not trigger picker', async () => {
+    const safeExp = Math.floor(Date.now() / 1000) + 7200;
+    const { mod } = await setupLink({
+      tabsResult: [{ id: 42 }],
+      sendMessageResult: { success: true, token: 'tok', fleetId: 'F1', exp: safeExp, foundIn: 'ls' },
+    });
+
+    const result = await mod.connectFleetEdge();
+    // Should proceed to backend (not picker)
+    expect(result.needsTabPick).toBeUndefined();
+  });
+
+  it('G-1: connect with tabId picks that specific tab', async () => {
+    const safeExp = Math.floor(Date.now() / 1000) + 7200;
+    const sendMessageMock = vi.fn().mockResolvedValue({
+      success: true, token: 'tok', fleetId: 'FA1', exp: safeExp, foundIn: 'ls',
+    });
+    const { mod } = await setupLink({
+      tabsResult: [{ id: 10 }, { id: 20 }],
+      sendMessageImpl: sendMessageMock,
+    });
+
+    await mod.connectFleetEdge({ tabId: 10 });
+
+    // Should only call sendMessage for the chosen tab (READ_FLEETEDGE_TOKEN).
+    const readCalls = sendMessageMock.mock.calls.filter(
+      ([, msg]) => msg?.type === 'READ_FLEETEDGE_TOKEN'
+    );
+    expect(readCalls.every(([tabId]) => tabId === 10)).toBe(true);
+  });
+
+  // ── G-2: fleet_id mismatch guard ───────────────────────────────────────────
+
+  it('G-2: reconnect refuses when tab JWT fleet_id mismatches expectedFleetId', async () => {
+    // JWT claims fleet_id FA1 but we are reconnecting FB2
+    const payloadWrong = btoa(JSON.stringify({ fleet_id: 'FA1', exp: 9999999999 }))
+      .replace(/\+/g, '-').replace(/\//g, '_').replace(/=/g, '');
+    const wrongJwt = `eyJhbGciOiJSUzI1NiJ9.${payloadWrong}.sig`;
+
+    const { mod, store, telemetryCalls } = await setupLink({
+      tabsResult: [{ id: 99 }],
+      sendMessageResult: { success: true, token: wrongJwt, fleetId: 'FA1', exp: 9999999999, foundIn: 'ls' },
+    });
+
+    // Seed storage so reconnectFleetEdgeAccount can find the account
+    store.fleetEdgeAccounts = [{ accountId: 'acc-b', fleetId: 'FB2', friendlyName: 'Bob' }];
+
+    const result = await mod.reconnectFleetEdgeAccount('acc-b');
+
+    expect(result.success).toBe(false);
+    expect(result.error).toContain('different account');
+
+    // Should emit a TOKEN.WARN
+    const warnEvt = telemetryCalls.find((e) => e.layer === 'TOKEN' && e.sev === 'WARN' && e.msg.includes('mismatch'));
+    expect(warnEvt).toBeDefined();
+    expect(warnEvt.extra.expectedFleetId).toBe('FB2');
+    expect(warnEvt.extra.tokenFleetId).toBe('FA1');
+  });
+
+  it('G-2: reconnect succeeds when tab JWT fleet_id matches expectedFleetId', async () => {
+    const safeExp = Math.floor(Date.now() / 1000) + 7200;
+    const payload = btoa(JSON.stringify({ fleet_id: 'FC3', exp: safeExp }))
+      .replace(/\+/g, '-').replace(/\//g, '_').replace(/=/g, '');
+    const jwt = `eyJhbGciOiJSUzI1NiJ9.${payload}.sig`;
+
+    const { mod, store } = await setupLink({
+      tabsResult: [{ id: 55 }],
+      sendMessageResult: { success: true, token: jwt, fleetId: 'FC3', exp: safeExp, foundIn: 'ls' },
+    });
+
+    store.fleetEdgeAccounts = [{ accountId: 'acc-c', fleetId: 'FC3', friendlyName: 'Carol' }];
+
+    const result = await mod.reconnectFleetEdgeAccount('acc-c');
+    expect(result.success).toBe(true);
   });
 });
