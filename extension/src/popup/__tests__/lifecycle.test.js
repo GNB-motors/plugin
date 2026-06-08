@@ -22,7 +22,7 @@ describe('resetTransientState (H-12: auth-transition state reset)', () => {
     };
     resetTransientState(setters);
 
-    expect(setters.setAppState).toHaveBeenCalledWith(null);
+    expect(setters.setAppState).toHaveBeenCalledWith({ authenticated: false });
     expect(setters.setView).toHaveBeenCalledWith('login');
     expect(setters.setLogs).toHaveBeenCalledWith([]);
     expect(setters.setToast).toHaveBeenCalledWith(null);
@@ -57,7 +57,7 @@ describe('resetTransientState (H-12: auth-transition state reset)', () => {
       },
     };
     resetTransientState(setters);
-    expect(state.appState).toBeNull();
+    expect(state.appState).toEqual({ authenticated: false });
     expect(state.logs).toEqual([]);
     expect(state.banners.size).toBe(0);
   });

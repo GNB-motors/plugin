@@ -23,7 +23,10 @@ export function resetTransientState(setters) {
     setLoginLoading,
     setLoginError,
   } = setters;
-  setAppState?.(null);
+  // Use a logged-out object rather than null — null re-enters the bootstrap
+  // loading screen because Popup.jsx treats appState === null as "not yet
+  // initialised". A non-null logged-out state takes us straight to login.
+  setAppState?.({ authenticated: false });
   setView?.('login');
   setLogs?.([]);
   setToast?.(null);

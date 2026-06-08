@@ -298,7 +298,21 @@ async function _connectFleetEdgeInner({ expectedFleetId = null, expectedAccountI
         ? String(payload.fleet_id || payload.fleetId)
         : null;
     const tokenFleetId = claimFleetId || (captured.fleetId ? String(captured.fleetId) : null);
-    if (tokenFleetId && String(expectedFleetId) !== tokenFleetId) {
+    // Fail closed: if we can't derive an identity from the token, refuse rather than
+    // silently link an unverifiable token onto an existing account row.
+    if (!tokenFleetId) {
+      feTel.warn('Reconnect aborted — unable to verify token owner', {
+        expectedFleetId: String(expectedFleetId),
+        expectedAccountId,
+      });
+      feTel.perfEnd('connect');
+      return {
+        success: false,
+        error:
+          'Could not verify FleetEdge account identity from token — refresh FleetEdge and try again',
+      };
+    }
+    if (String(expectedFleetId) !== tokenFleetId) {
       feTel.warn('Reconnect aborted — JWT owner does not match requested account', {
         expectedFleetId: String(expectedFleetId),
         tokenFleetId,
@@ -350,18 +364,21 @@ async function _connectFleetEdgeInner({ expectedFleetId = null, expectedAccountI
  * Reconnect a specific account (same capture flow, backend upserts by userId+accountId).
  */
 export async function reconnectFleetEdgeAccount(accountId) {
-  logger.info(`Reconnecting account ${accountId}`);
-  // Look up the expected fleetId from local storage so connect can refuse the
-  // token if the FleetEdge tab is logged into a different account (H-3).
-  const store = await getStorage(['fleetEdgeAccounts']);
-  const account = (store.fleetEdgeAccounts || []).find((a) => a.accountId === accountId);
-  if (!account) {
-    feTel.warn('Reconnect requested for unknown account', { accountId });
-    return { success: false, error: 'Account not found — try refreshing the popup' };
-  }
-  return connectFleetEdge({
-    expectedFleetId: account.fleetId,
-    expectedAccountId: accountId,
+  // Both the lookup and the inner connect run under the same lock so a
+  // concurrent disconnect/rename can't invalidate the fleetId snapshot
+  // between read and link.
+  return withLinkLock(async () => {
+    logger.info(`Reconnecting account ${accountId}`);
+    const store = await getStorage(['fleetEdgeAccounts']);
+    const account = (store.fleetEdgeAccounts || []).find((a) => a.accountId === accountId);
+    if (!account) {
+      feTel.warn('Reconnect requested for unknown account', { accountId });
+      return { success: false, error: 'Account not found — try refreshing the popup' };
+    }
+    return _connectFleetEdgeInner({
+      expectedFleetId: account.fleetId,
+      expectedAccountId: accountId,
+    });
   });
 }
 

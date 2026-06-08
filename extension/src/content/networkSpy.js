@@ -26,9 +26,12 @@
   const ALLOWED_PATH_PREFIXES = ['/api/vehicle-service/', '/api/user-service/'];
 
   function isAllowedUrl(rawUrl) {
-    if (!rawUrl || typeof rawUrl !== 'string') return false;
+    if (!rawUrl) return false;
     try {
-      const u = new URL(rawUrl, TARGET_ORIGIN);
+      // Coerce URL/URL-like objects to string so xhr.open(method, new URL(...))
+      // still gets allow-listed.
+      const normalizedUrl = typeof rawUrl === 'string' ? rawUrl : String(rawUrl);
+      const u = new URL(normalizedUrl, TARGET_ORIGIN);
       if (u.origin !== TARGET_ORIGIN) return false;
       return ALLOWED_PATH_PREFIXES.some((p) => u.pathname.startsWith(p));
     } catch {

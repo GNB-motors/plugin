@@ -888,7 +888,10 @@ export default function Popup() {
               danger: true,
               run: async () => {
                 try {
-                  await chrome.runtime.sendMessage({ type: 'CLEAR_ALL' });
+                  const res = await chrome.runtime.sendMessage({ type: 'CLEAR_ALL' });
+                  if (!res?.success) {
+                    throw new Error(res?.error || 'Failed to clear data');
+                  }
                   resetTransientState({
                     setAppState,
                     setView,

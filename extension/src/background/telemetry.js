@@ -220,10 +220,10 @@ function buildEvent(layer, severity, message, extra = {}) {
       /ey[A-Za-z0-9_-]{15,}\.[A-Za-z0-9_-]{5,}\.[A-Za-z0-9_-]{5,}/g,
       (m) => redactToken(m),
     );
-    event.fingerprint = computeFingerprint(layer, err.name, message);
+    event.fingerprint = computeFingerprint(layer, err.name, safeMessage);
     delete event.error; // Don't store raw error object
   } else if (severityLevel >= SEVERITY.WARN) {
-    event.fingerprint = computeFingerprint(layer, 'Warning', message);
+    event.fingerprint = computeFingerprint(layer, 'Warning', safeMessage);
   }
 
   return event;

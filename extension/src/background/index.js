@@ -77,6 +77,10 @@ function invalidateStatusCache() {
 // re-hitting the backend.
 let _lastTriggerAt = 0;
 let _lastTriggerResult = null;
+function resetTriggerCooldownState() {
+  _lastTriggerAt = 0;
+  _lastTriggerResult = null;
+}
 
 // Initialize telemetry
 startTelemetry();
@@ -171,6 +175,7 @@ async function handleMessage(message) {
     case 'LOGOUT': {
       tlog.info('Logout requested');
       await logout();
+      resetTriggerCooldownState();
       invalidateStatusCache();
       chrome.action.setBadgeText({ text: '' });
       return { success: true };
@@ -353,6 +358,7 @@ async function handleMessage(message) {
       }
 
       invalidateStatusCache();
+      resetTriggerCooldownState();
 
       // G-3: Reset in-memory notification set so the next user's session starts clean.
       resetNotifiedAccounts();
