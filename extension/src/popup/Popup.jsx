@@ -1,5 +1,6 @@
-import { useState, useEffect, useRef, useCallback, useMemo } from 'react';
+import { useState, useEffect, useRef, useCallback, useMemo, useId } from 'react';
 import './Popup.css';
+import { resetTransientState } from './lifecycle.js';
 
 const AUTO_REFRESH_MS = 30_000;
 
@@ -605,13 +606,55 @@ function ExpiredBanner({ account, onAction, onDismiss }) {
 }
 
 function ConfirmModal({ title, body, confirmLabel = 'Confirm', danger, onConfirm, onCancel }) {
+  const modalRef = useRef(null);
+  const cancelBtnRef = useRef(null);
+  const titleId = useId();
+
+  // Esc to close + simple focus trap (Tab cycles between focusable elements).
+  useEffect(() => {
+    const handleKeyDown = (e) => {
+      if (e.key === 'Escape') {
+        e.stopPropagation();
+        onCancel?.();
+        return;
+      }
+      if (e.key === 'Tab' && modalRef.current) {
+        const focusables = modalRef.current.querySelectorAll(
+          'button, [href], input, [tabindex]:not([tabindex="-1"])'
+        );
+        if (focusables.length === 0) return;
+        const first = focusables[0];
+        const last = focusables[focusables.length - 1];
+        const active = document.activeElement;
+        if (e.shiftKey && active === first) {
+          e.preventDefault();
+          last.focus();
+        } else if (!e.shiftKey && active === last) {
+          e.preventDefault();
+          first.focus();
+        }
+      }
+    };
+    document.addEventListener('keydown', handleKeyDown);
+    // Auto-focus the cancel button so Esc/Enter feel natural.
+    cancelBtnRef.current?.focus();
+    return () => document.removeEventListener('keydown', handleKeyDown);
+  }, [onCancel]);
+
   return (
     <div className="gnb-modal-backdrop" onClick={onCancel}>
-      <div className="gnb-modal" onClick={(e) => e.stopPropagation()}>
-        <h3>{title}</h3>
+      <div
+        className="gnb-modal"
+        ref={modalRef}
+        role="dialog"
+        aria-modal="true"
+        aria-labelledby={titleId}
+        onClick={(e) => e.stopPropagation()}
+      >
+        <h3 id={titleId}>{title}</h3>
         <p>{body}</p>
         <div className="gnb-modal-actions">
-          <button className="gnb-btn ghost sm" onClick={onCancel}>
+          <button className="gnb-btn ghost sm" ref={cancelBtnRef} onClick={onCancel}>
             Cancel
           </button>
           <button
@@ -638,29 +681,50 @@ export default function Popup() {
   const [loginLoading, setLoginLoading] = useState(false);
   const [loginError, setLoginError] = useState('');
   const toastTimer = useRef(null);
+  // Tracks whether the component is still mounted so async tasks can bail out
+  // before calling setState — avoids React "setState on unmounted" warnings and
+  // prevents a popup that was closed/reopened from rendering pre-close data.
+  const mountedRef = useRef(true);
+  // View ref so refreshStatus can read the latest value without re-binding the
+  // interval on every navigation (was previously a stale-closure source).
+  const viewRef = useRef(view);
+  useEffect(() => {
+    viewRef.current = view;
+  }, [view]);
 
   const showToast = useCallback((message, kind = '') => {
     clearTimeout(toastTimer.current);
     setToast({ id: Date.now() + Math.random(), message, kind });
-    toastTimer.current = setTimeout(() => setToast(null), 3000);
+    toastTimer.current = setTimeout(() => {
+      if (mountedRef.current) setToast(null);
+    }, 3000);
   }, []);
 
-  const refreshStatus = useCallback(async () => {
+  const refreshStatus = useCallback(async (signal) => {
     try {
       const res = await chrome.runtime.sendMessage({ type: 'GET_STATUS' });
+      if (signal?.aborted || !mountedRef.current) return;
+      if (!res) return; // SW restarting — leave previous state, retry next tick
       setAppState(res);
-      if (res.authenticated && view === 'login') setView('home');
+      if (res.authenticated && viewRef.current === 'login') setView('home');
       if (!res.authenticated) setView('login');
     } catch {
       /* SW not ready — will retry */
     }
-  }, [view]);
+  }, []);
 
   useEffect(() => {
-    refreshStatus();
-    const id = setInterval(refreshStatus, AUTO_REFRESH_MS);
-    return () => clearInterval(id);
-  }, []); // eslint-disable-line react-hooks/exhaustive-deps
+    mountedRef.current = true;
+    const ac = new AbortController();
+    refreshStatus(ac.signal);
+    const id = setInterval(() => refreshStatus(ac.signal), AUTO_REFRESH_MS);
+    return () => {
+      mountedRef.current = false;
+      ac.abort();
+      clearInterval(id);
+      clearTimeout(toastTimer.current);
+    };
+  }, [refreshStatus]);
 
   const onAction = useCallback(
     async (type, payload) => {
@@ -669,8 +733,16 @@ export default function Popup() {
           case 'login': {
             setLoginLoading(true);
             setLoginError('');
+            // Clear any leftover state from a previous user session before
+            // the new session's data arrives — prevents stale logs / banners.
+            setLogs([]);
+            setDismissedBanners(new Set());
             const res = await chrome.runtime.sendMessage({ type: 'LOGIN', ...payload });
-            if (res.error) throw new Error(res.error);
+            if (!res) throw new Error('Service worker unavailable');
+            if (res.error) {
+              setLoginError(res.error);
+              throw new Error(res.error);
+            }
             await refreshStatus();
             setView('home');
             break;
@@ -678,8 +750,16 @@ export default function Popup() {
 
           case 'logout': {
             await chrome.runtime.sendMessage({ type: 'LOGOUT' });
-            setAppState(null);
-            setView('login');
+            resetTransientState({
+              setAppState,
+              setView,
+              setLogs,
+              setToast,
+              setConfirming,
+              setDismissedBanners,
+              setLoginLoading,
+              setLoginError,
+            });
             showToast('Signed out', 'ok');
             break;
           }
@@ -795,10 +875,22 @@ export default function Popup() {
               confirmLabel: 'Clear everything',
               danger: true,
               run: async () => {
-                await chrome.runtime.sendMessage({ type: 'CLEAR_ALL' });
-                setAppState(null);
-                setView('login');
-                showToast('All data cleared', 'ok');
+                try {
+                  await chrome.runtime.sendMessage({ type: 'CLEAR_ALL' });
+                  resetTransientState({
+                    setAppState,
+                    setView,
+                    setLogs,
+                    setToast,
+                    setConfirming,
+                    setDismissedBanners,
+                    setLoginLoading,
+                    setLoginError,
+                  });
+                  showToast('All data cleared', 'ok');
+                } catch (err) {
+                  showToast(err?.message || 'Failed to clear data', 'err');
+                }
               },
             });
             break;
@@ -852,9 +944,14 @@ export default function Popup() {
         {confirming && (
           <ConfirmModal
             {...confirming}
-            onConfirm={() => {
-              confirming.run?.();
+            onConfirm={async () => {
+              const run = confirming.run;
               setConfirming(null);
+              try {
+                await run?.();
+              } catch (err) {
+                showToast(err?.message || 'Action failed', 'err');
+              }
             }}
             onCancel={() => setConfirming(null)}
           />
