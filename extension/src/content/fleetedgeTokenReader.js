@@ -11,11 +11,20 @@
 let interceptedToken = null;
 let interceptedFleetId = null;
 
+// Origin lock for inbound postMessage intercepts (audit H-1). Only messages
+// from the FleetEdge page origin are accepted. The MAIN-world spy is
+// declared to run on this exact origin, so its postMessage will have
+// event.origin === FLEETEDGE_ORIGIN.
+const FLEETEDGE_ORIGIN = 'https://fleetedge.home.tatamotors';
+
 // Listen for messages from the MAIN world spy script
 window.addEventListener('message', (event) => {
-  if (event.source !== window || !event.data || event.data.type !== 'FLEETEDGE_INTERCEPT') {
-    return;
-  }
+  // Same-window check: reject messages from frames / cross-window sources.
+  if (event.source !== window) return;
+  // Origin check: reject forged messages claiming to be from a different
+  // origin (e.g. a malicious userscript / other-extension MAIN-world script).
+  if (event.origin !== FLEETEDGE_ORIGIN) return;
+  if (!event.data || event.data.type !== 'FLEETEDGE_INTERCEPT') return;
 
   if (event.data.token) interceptedToken = event.data.token;
   if (event.data.fleetId) interceptedFleetId = event.data.fleetId;
