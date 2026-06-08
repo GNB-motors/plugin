@@ -7,7 +7,45 @@
  */
 
 import { config } from './config.js';
-import { getStorage, setStorage } from './utils.js';
+import { getStorage, setStorage, redactToken } from './utils.js';
+
+// ─── PII / JWT redaction (H-5) ───────────────────────────────────────────────
+
+const JWT_RE = /^ey[A-Za-z0-9_-]{15,}\.[A-Za-z0-9_-]{5,}\.[A-Za-z0-9_-]{5,}$/;
+const BEARER_JWT_RE = /^Bearer\s+(ey[A-Za-z0-9_-]{15,}\.[A-Za-z0-9_-]{5,}\.[A-Za-z0-9_-]{5,})$/;
+const PII_KEYS = new Set(['email', 'phone', 'firstname', 'lastname', 'name', 'mobile', 'username']);
+const MAX_REDACT_DEPTH = 6;
+
+function redactString(value) {
+  if (typeof value !== 'string') return value;
+  if (JWT_RE.test(value)) return redactToken(value);
+  const bearer = value.match(BEARER_JWT_RE);
+  if (bearer) return `Bearer ${redactToken(bearer[1])}`;
+  return value;
+}
+
+/**
+ * Recursively redact JWT-shaped strings and known PII keys from event context.
+ * Applied at emit time so chrome.storage.local buffer never holds plaintext.
+ */
+function redactContext(input, depth = 0) {
+  if (depth > MAX_REDACT_DEPTH) return input;
+  if (input == null) return input;
+  if (typeof input === 'string') return redactString(input);
+  if (typeof input !== 'object') return input;
+  if (Array.isArray(input)) {
+    return input.map((v) => redactContext(v, depth + 1));
+  }
+  const out = {};
+  for (const [key, value] of Object.entries(input)) {
+    if (PII_KEYS.has(key.toLowerCase()) && value != null && typeof value !== 'object') {
+      out[key] = '***';
+    } else {
+      out[key] = redactContext(value, depth + 1);
+    }
+  }
+  return out;
+}
 
 // ─── Constants ───────────────────────────────────────────────────────────────
 
@@ -155,6 +193,11 @@ function buildEvent(layer, severity, message, extra = {}) {
   const minLevel = SEVERITY[config.TELEMETRY_MIN_SEVERITY] || 0;
   if (severityLevel < minLevel) return null;
 
+  // Preserve raw error for stack/name extraction; redact the rest of the context.
+  const { error: rawError, ...restExtra } = extra || {};
+  const safeExtra = redactContext(restExtra);
+  const safeMessage = redactString(String(message)).slice(0, 2000);
+
   const event = {
     id: crypto.randomUUID(),
     timestamp: new Date().toISOString(),
@@ -162,16 +205,21 @@ function buildEvent(layer, severity, message, extra = {}) {
     layer,
     severity: severityName,
     severityLevel,
-    message: String(message).slice(0, 2000),
+    message: safeMessage,
     extensionVersion,
-    ...extra,
+    ...safeExtra,
   };
 
   // Error-specific fields
-  if (severityLevel >= SEVERITY.ERROR && extra.error) {
-    const err = extra.error instanceof Error ? extra.error : new Error(String(extra.error));
+  if (severityLevel >= SEVERITY.ERROR && rawError) {
+    const err = rawError instanceof Error ? rawError : new Error(String(rawError));
     event.errorName = err.name;
-    event.stack = err.stack?.slice(0, 4000) || '';
+    const rawStack = err.stack?.slice(0, 4000) || '';
+    // Redact JWT-shaped substrings from stack traces / error messages.
+    event.stack = rawStack.replace(
+      /ey[A-Za-z0-9_-]{15,}\.[A-Za-z0-9_-]{5,}\.[A-Za-z0-9_-]{5,}/g,
+      (m) => redactToken(m),
+    );
     event.fingerprint = computeFingerprint(layer, err.name, message);
     delete event.error; // Don't store raw error object
   } else if (severityLevel >= SEVERITY.WARN) {
