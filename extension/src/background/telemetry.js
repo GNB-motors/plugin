@@ -38,7 +38,7 @@ function redactContext(input, depth = 0) {
   }
   const out = {};
   for (const [key, value] of Object.entries(input)) {
-    if (PII_KEYS.has(key.toLowerCase()) && value != null && typeof value !== 'object') {
+    if (PII_KEYS.has(key.toLowerCase()) && value != null) {
       out[key] = '***';
     } else {
       out[key] = redactContext(value, depth + 1);

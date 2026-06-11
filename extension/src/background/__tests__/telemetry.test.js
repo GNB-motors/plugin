@@ -646,6 +646,18 @@ describe('LEMU telemetry', () => {
       expect(ev.accounts[1].name).toBe('***');
     });
 
+    it('redacts PII keys even when the value is an object', () => {
+      // Defensive: future backend shapes may send { email: { address, verified } }
+      // rather than a plain string. The redactor must not recurse into the object
+      // and leak nested fields just because the key is not at the leaf level.
+      const ev = record(LAYERS.BACKEND, 'INFO', 'profile', {
+        email: { address: 'secret@example.com', verified: true },
+        phone: { country: '+91', number: '9999999999' },
+      });
+      expect(ev.email).toBe('***');
+      expect(ev.phone).toBe('***');
+    });
+
     it('leaves non-JWT strings untouched', () => {
       const ev = record(LAYERS.UI, 'INFO', 'misc', { msg: 'hello world', n: 42, ok: true });
       expect(ev.msg).toBe('hello world');
