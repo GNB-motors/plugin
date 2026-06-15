@@ -170,4 +170,76 @@ describe('withRetry', () => {
     await assertion;
     expect(fn).toHaveBeenCalledTimes(3); // MAX_RETRY_ATTEMPTS
   });
+
+  it.each([400, 401, 403, 404, 422])(
+    'fails immediately on %i without retrying',
+    async (status) => {
+      const err = Object.assign(new Error('client'), { status });
+      const fn = vi.fn().mockRejectedValue(err);
+      const assertion = expect(withRetry(fn, 'op')).rejects.toMatchObject({ status });
+      await vi.runAllTimersAsync();
+      await assertion;
+      expect(fn).toHaveBeenCalledTimes(1);
+    }
+  );
+
+  it('429 without Retry-After fails fast (no exponential retry)', async () => {
+    const err = Object.assign(new Error('rate-limited'), { status: 429 });
+    const fn = vi.fn().mockRejectedValue(err);
+    const assertion = expect(withRetry(fn, 'op')).rejects.toMatchObject({ status: 429 });
+    await vi.runAllTimersAsync();
+    await assertion;
+    expect(fn).toHaveBeenCalledTimes(1);
+  });
+
+  it('429 with Retry-After waits the header amount then retries exactly once', async () => {
+    const err429 = Object.assign(new Error('rate-limited'), {
+      status: 429,
+      retryAfterMs: 5_000,
+    });
+    const fn = vi.fn().mockRejectedValueOnce(err429).mockResolvedValueOnce('ok');
+
+    const assertion = expect(withRetry(fn, 'op')).resolves.toBe('ok');
+
+    // Before waiting Retry-After: only the first attempt has fired.
+    await vi.advanceTimersByTimeAsync(0);
+    expect(fn).toHaveBeenCalledTimes(1);
+
+    // After 4.9s: still waiting, no retry yet.
+    await vi.advanceTimersByTimeAsync(4_900);
+    expect(fn).toHaveBeenCalledTimes(1);
+
+    // After the full 5s: retry fires.
+    await vi.advanceTimersByTimeAsync(200);
+    await assertion;
+    expect(fn).toHaveBeenCalledTimes(2);
+  });
+
+  it('429 Retry-After is capped at 60s', async () => {
+    const err429 = Object.assign(new Error('rate-limited'), {
+      status: 429,
+      retryAfterMs: 5 * 60 * 1000, // 5 minutes — should be capped
+    });
+    const fn = vi.fn().mockRejectedValueOnce(err429).mockResolvedValueOnce('ok');
+
+    const assertion = expect(withRetry(fn, 'op')).resolves.toBe('ok');
+
+    // After 60s the retry should fire (cap), even though header said 5min.
+    await vi.advanceTimersByTimeAsync(60_000);
+    await assertion;
+    expect(fn).toHaveBeenCalledTimes(2);
+  });
+
+  it('429 only retries once even if Retry-After present — second 429 fails fast', async () => {
+    const err429 = Object.assign(new Error('rate-limited'), {
+      status: 429,
+      retryAfterMs: 1_000,
+    });
+    const fn = vi.fn().mockRejectedValue(err429);
+    const assertion = expect(withRetry(fn, 'op')).rejects.toMatchObject({ status: 429 });
+    await vi.runAllTimersAsync();
+    await assertion;
+    // First attempt + one honored retry = 2 calls, then bail.
+    expect(fn).toHaveBeenCalledTimes(2);
+  });
 });

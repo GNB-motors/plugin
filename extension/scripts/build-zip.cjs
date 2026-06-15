@@ -10,7 +10,7 @@
 
 const fs = require('fs');
 const path = require('path');
-const { execSync } = require('child_process');
+const { execFileSync } = require('child_process');
 
 const ROOT = path.resolve(__dirname, '..');
 const DIST = path.join(ROOT, 'dist');
@@ -36,12 +36,18 @@ const isWin = process.platform === 'win32';
 
 try {
   if (isWin) {
-    execSync(
-      `powershell -NoProfile -Command "Compress-Archive -Path '${DIST}\\*' -DestinationPath '${zipPath}' -Force"`,
+    // Pass args as array; PowerShell -Command receives a single script block
+    // built from a static template, with paths interpolated via -ArgumentList.
+    // Equivalent: Compress-Archive -Path <DIST>\* -DestinationPath <zipPath> -Force
+    const psScript =
+      "param($src,$dst) Compress-Archive -Path (Join-Path $src '*') -DestinationPath $dst -Force";
+    execFileSync(
+      'powershell',
+      ['-NoProfile', '-Command', psScript, '-src', DIST, '-dst', zipPath],
       { stdio: 'inherit' }
     );
   } else {
-    execSync(`cd "${DIST}" && zip -r "${zipPath}" .`, { stdio: 'inherit' });
+    execFileSync('zip', ['-r', zipPath, '.'], { stdio: 'inherit', cwd: DIST });
   }
 
   const stats = fs.statSync(zipPath);

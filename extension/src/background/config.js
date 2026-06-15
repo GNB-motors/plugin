@@ -19,4 +19,8 @@ export const config = {
   TELEMETRY_SHIP_INTERVAL_MS: 60_000, // Ship to backend every 60s
   TELEMETRY_HEALTH_CHECK_INTERVAL_MS: 300_000, // Health snapshot every 5min
   FETCH_TIMEOUT_MS: 15_000, // Global fetch timeout
+
+  // Server-side cooldown for manual TRIGGER_PROCESS to prevent popup spam
+  // from fanning out to backend (and downstream FleetEdge) WAF rate-limits.
+  TRIGGER_COOLDOWN_MS: 30_000,
 };

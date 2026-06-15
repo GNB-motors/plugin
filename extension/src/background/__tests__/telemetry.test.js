@@ -584,4 +584,112 @@ describe('LEMU telemetry', () => {
       );
     });
   });
+
+  // ─── H-5: PII / JWT redaction at emit time ─────────────────────────────────
+  describe('PII + JWT redaction (H-5)', () => {
+    const JWT = 'eyAAAAAAAAAAAAAAA.BBBBBBBBB.CCCCCCCCC';
+
+    it('redacts JWT-shaped string values', () => {
+      const ev = record(LAYERS.FLEETEDGE, 'INFO', 'link', { token: JWT });
+      expect(ev.token).not.toBe(JWT);
+      expect(ev.token).toMatch(/…/); // redactToken returns prefix…suffix
+      expect(ev.token).not.toContain('BBBBBBBBB');
+    });
+
+    it('redacts Bearer-prefixed JWT', () => {
+      const ev = record(LAYERS.BACKEND, 'INFO', 'call', { authorization: `Bearer ${JWT}` });
+      expect(ev.authorization.startsWith('Bearer ')).toBe(true);
+      expect(ev.authorization).not.toContain('BBBBBBBBB');
+      expect(ev.authorization).toMatch(/…/);
+    });
+
+    it('replaces PII key values with ***', () => {
+      const ev = record(LAYERS.FLEETEDGE, 'INFO', 'profile', {
+        user: { email: 'x@y.com', firstName: 'A', lastName: 'B', phone: '+1234567890' },
+      });
+      expect(ev.user.email).toBe('***');
+      expect(ev.user.firstName).toBe('***');
+      expect(ev.user.lastName).toBe('***');
+      expect(ev.user.phone).toBe('***');
+    });
+
+    it('redacts PII key match case-insensitively', () => {
+      const ev = record(LAYERS.UI, 'INFO', 'form', {
+        EMAIL: 'x@y.com',
+        UserName: 'someone',
+        Mobile: '555',
+      });
+      expect(ev.EMAIL).toBe('***');
+      expect(ev.UserName).toBe('***');
+      expect(ev.Mobile).toBe('***');
+    });
+
+    it('walks nested objects', () => {
+      const ev = record(LAYERS.FLEETEDGE, 'INFO', 'nested', {
+        outer: { inner: { token: JWT, user: { email: 'a@b.com' } } },
+      });
+      expect(ev.outer.inner.token).not.toContain('BBBBBBBBB');
+      expect(ev.outer.inner.token).toMatch(/…/);
+      expect(ev.outer.inner.user.email).toBe('***');
+    });
+
+    it('walks arrays of objects', () => {
+      const ev = record(LAYERS.FLEETEDGE, 'INFO', 'arr', {
+        accounts: [
+          { token: JWT, email: 'a@b.com' },
+          { token: JWT, name: 'Some One' },
+        ],
+      });
+      expect(ev.accounts[0].token).toMatch(/…/);
+      expect(ev.accounts[0].token).not.toContain('BBBBBBBBB');
+      expect(ev.accounts[0].email).toBe('***');
+      expect(ev.accounts[1].name).toBe('***');
+    });
+
+    it('redacts PII keys even when the value is an object', () => {
+      // Defensive: future backend shapes may send { email: { address, verified } }
+      // rather than a plain string. The redactor must not recurse into the object
+      // and leak nested fields just because the key is not at the leaf level.
+      const ev = record(LAYERS.BACKEND, 'INFO', 'profile', {
+        email: { address: 'secret@example.com', verified: true },
+        phone: { country: '+91', number: '9999999999' },
+      });
+      expect(ev.email).toBe('***');
+      expect(ev.phone).toBe('***');
+    });
+
+    it('leaves non-JWT strings untouched', () => {
+      const ev = record(LAYERS.UI, 'INFO', 'misc', { msg: 'hello world', n: 42, ok: true });
+      expect(ev.msg).toBe('hello world');
+      expect(ev.n).toBe(42);
+      expect(ev.ok).toBe(true);
+    });
+
+    it('caps recursion depth without throwing', () => {
+      // Build a deeply nested object beyond depth cap.
+      let deep = { token: JWT };
+      for (let i = 0; i < 20; i++) deep = { child: deep };
+      expect(() => record(LAYERS.UI, 'INFO', 'deep', { tree: deep })).not.toThrow();
+    });
+
+    it('redacts before chrome.storage.local write (no plaintext in buffer)', () => {
+      const ev = record(LAYERS.FLEETEDGE, 'WARN', 'warn', { token: JWT });
+      // Buffer is the source for flush() → chrome.storage.local
+      const buffered = _internals.eventBuffer.find((e) => e.id === ev.id);
+      expect(buffered).toBeDefined();
+      expect(buffered.token).not.toContain('BBBBBBBBB');
+      expect(JSON.stringify(buffered)).not.toContain('BBBBBBBBB');
+    });
+
+    it('redacts before WARN+ ship queue entry', () => {
+      const ev = record(LAYERS.FLEETEDGE, 'ERROR', 'err', {
+        token: JWT,
+        user: { email: 'x@y.com' },
+      });
+      // Without TELEMETRY_SHIP_TO_BACKEND=true the queue is empty; assert via the
+      // returned event (same object that would be pushed).
+      expect(ev.token).not.toContain('BBBBBBBBB');
+      expect(ev.user.email).toBe('***');
+    });
+  });
 });

@@ -222,6 +222,70 @@ describe('Edge Cases', () => {
     expect(chrome.storage.local.remove).toHaveBeenCalledWith(['authToken', 'authUser']);
   });
 
+  it('429 response attaches status and retryAfterMs (integer seconds) to thrown error', async () => {
+    STORE.authToken = 'jwt-123';
+    vi.stubGlobal(
+      'fetch',
+      vi.fn().mockResolvedValue({
+        ok: false,
+        status: 429,
+        headers: { get: (k) => (k === 'Retry-After' ? '7' : null) },
+        json: () => Promise.resolve({ message: 'slow down' }),
+      })
+    );
+    let caught;
+    try {
+      await backendFetch('/test');
+    } catch (err) {
+      caught = err;
+    }
+    expect(caught).toBeDefined();
+    expect(caught.status).toBe(429);
+    expect(caught.retryAfterMs).toBe(7_000);
+  });
+
+  it('429 without Retry-After header: status set, retryAfterMs absent', async () => {
+    STORE.authToken = 'jwt-123';
+    vi.stubGlobal(
+      'fetch',
+      vi.fn().mockResolvedValue({
+        ok: false,
+        status: 429,
+        headers: { get: () => null },
+        json: () => Promise.resolve({ message: 'slow down' }),
+      })
+    );
+    let caught;
+    try {
+      await backendFetch('/test');
+    } catch (err) {
+      caught = err;
+    }
+    expect(caught.status).toBe(429);
+    expect(caught.retryAfterMs).toBeUndefined();
+  });
+
+  it('non-429 errors get status attached but no retryAfterMs', async () => {
+    STORE.authToken = 'jwt-123';
+    vi.stubGlobal(
+      'fetch',
+      vi.fn().mockResolvedValue({
+        ok: false,
+        status: 503,
+        headers: { get: () => null },
+        json: () => Promise.resolve({ message: 'unavailable' }),
+      })
+    );
+    let caught;
+    try {
+      await backendFetch('/test');
+    } catch (err) {
+      caught = err;
+    }
+    expect(caught.status).toBe(503);
+    expect(caught.retryAfterMs).toBeUndefined();
+  });
+
   it('AbortError from fetch is converted to a descriptive timeout message', async () => {
     STORE.authToken = 'jwt-123';
     vi.stubGlobal(
