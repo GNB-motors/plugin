@@ -23,7 +23,14 @@
   window.__fe_spy_initialized = true;
 
   const TARGET_ORIGIN = window.location.origin;
-  const ALLOWED_PATH_PREFIXES = ['/api/vehicle-service/', '/api/user-service/'];
+  const ALLOWED_PATH_PREFIXES = [
+    '/api/vehicle-service/',
+    '/api/user-service/',
+    '/api/user-general/',
+  ];
+  // The refresh endpoint uses a static Basic auth header, so the Bearer
+  // trigger never fires for it — it needs its own response-body capture path.
+  const REFRESH_TOKEN_PATH = '/api/user-general/get-token-by-refresh-token';
 
   function isAllowedUrl(rawUrl) {
     if (!rawUrl) return false;
@@ -63,6 +70,38 @@
     }
   }
 
+  function isRefreshTokenUrl(rawUrl) {
+    try {
+      const u = new URL(String(rawUrl), TARGET_ORIGIN);
+      return u.pathname.endsWith(REFRESH_TOKEN_PATH);
+    } catch {
+      return false;
+    }
+  }
+
+  function extractRefreshTokenFromBody(body) {
+    try {
+      if (body && typeof body === 'string') {
+        const parsed = JSON.parse(body);
+        if (parsed.refresh_token) return parsed.refresh_token;
+      }
+    } catch {
+      // ignore parse failures
+    }
+    return null;
+  }
+
+  function emitRefreshIntercept(refreshToken, fleetId) {
+    try {
+      window.postMessage(
+        { type: 'FLEETEDGE_REFRESH_INTERCEPT', refreshToken, fleetId },
+        TARGET_ORIGIN
+      );
+    } catch {
+      // postMessage failures are silent (do not log raw tokens)
+    }
+  }
+
   // SPY ON XHR
   const originalXhrOpen = XMLHttpRequest.prototype.open;
   const originalXhrSetRequestHeader = XMLHttpRequest.prototype.setRequestHeader;
@@ -89,6 +128,32 @@
   };
 
   XMLHttpRequest.prototype.send = function (body) {
+    // Refresh-token capture: the refresh endpoint authenticates with a static
+    // Basic header, so the Bearer path never fires. Capture the rotated
+    // refresh_token from the 2xx response body, falling back to the request
+    // body's refresh_token.
+    if (isAllowedUrl(this._url) && isRefreshTokenUrl(this._url)) {
+      const requestBodyFleetId = extractFleetIdFromBody(body);
+      const requestBodyRefreshToken = extractRefreshTokenFromBody(body);
+
+      const onLoadRefresh = () => {
+        try {
+          if (this.status >= 200 && this.status < 300) {
+            const refreshToken =
+              extractRefreshTokenFromBody(this.responseText) || requestBodyRefreshToken;
+            if (refreshToken) {
+              emitRefreshIntercept(refreshToken, requestBodyFleetId);
+            }
+          }
+        } catch {
+          // ignore
+        } finally {
+          this.removeEventListener('load', onLoadRefresh);
+        }
+      };
+      this.addEventListener('load', onLoadRefresh);
+    }
+
     // Only buffer/emit if we have an Authorization header AND the URL is
     // on the FleetEdge API allow-list. Defer the actual postMessage until
     // onload confirms a 2xx response.
@@ -136,7 +201,21 @@
     const response = await originalFetch.apply(this, args);
 
     try {
-      if (token && isAllowedUrl(url) && response && response.ok) {
+      // Refresh-token capture (Basic-auth endpoint — no Bearer trigger).
+      if (isAllowedUrl(url) && isRefreshTokenUrl(url) && response && response.ok) {
+        let refreshToken = null;
+        try {
+          // Clone before reading so the page's own response body stays intact.
+          const data = await response.clone().json();
+          if (data && data.refresh_token) refreshToken = data.refresh_token;
+        } catch {
+          // Unreadable body — fall back to the request body's refresh_token.
+        }
+        if (!refreshToken) refreshToken = extractRefreshTokenFromBody(bodyForFleetId);
+        if (refreshToken) {
+          emitRefreshIntercept(refreshToken, extractFleetIdFromBody(bodyForFleetId));
+        }
+      } else if (token && isAllowedUrl(url) && response && response.ok) {
         emitIntercept(token, extractFleetIdFromBody(bodyForFleetId));
       }
     } catch {

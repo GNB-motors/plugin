@@ -21,11 +21,12 @@ const SPY_SRC = fs.readFileSync(
 
 const ORIGIN = 'https://fleetedge.home.tatamotors';
 
-function makeFakeXhr(responseStatus) {
+function makeFakeXhr(responseStatus, responseText) {
   class FakeXHR {
     constructor() {
       this._listeners = {};
       this.status = 0;
+      this.responseText = responseText;
     }
     open(method, url) {
       this._method = method;
@@ -49,13 +50,13 @@ function makeFakeXhr(responseStatus) {
   return FakeXHR;
 }
 
-function buildSandbox({ xhrStatus = 200, fetchOk = true } = {}) {
+function buildSandbox({ xhrStatus = 200, xhrResponseText = '', fetchOk = true, fetchResponseBody = null } = {}) {
   const postedMessages = [];
-  const FakeXHR = makeFakeXhr(xhrStatus);
+  const FakeXHR = makeFakeXhr(xhrStatus, xhrResponseText);
 
   const fakeFetch = vi.fn(async () =>
     // Minimal Response-like object.
-    ({ ok: fetchOk, status: fetchOk ? 200 : 500 })
+    ({ ok: fetchOk, status: fetchOk ? 200 : 500, clone: () => ({ json: async () => fetchResponseBody }) })
   );
 
   const sandbox = {
@@ -181,6 +182,159 @@ describe('networkSpy fetch', () => {
       `${ORIGIN}/api/something-else/y`,
       { headers: { Authorization: 'Bearer t' } }
     );
+    expect(postedMessages).toHaveLength(0);
+  });
+});
+
+describe('networkSpy refresh-token capture (XHR)', () => {
+  const REFRESH_URL = `${ORIGIN}/api/user-general/get-token-by-refresh-token`;
+  const REQUEST_BODY = JSON.stringify({
+    fleet_id: 'FLEET-1',
+    is_tipper: false,
+    refresh_token: 'request-refresh-token',
+    req_by: 'PORTALS',
+  });
+
+  it('emits FLEETEDGE_REFRESH_INTERCEPT from the response body on 2xx (Basic auth, no Bearer)', async () => {
+    const { sandbox, postedMessages } = buildSandbox({
+      xhrStatus: 200,
+      xhrResponseText: JSON.stringify({
+        access_token: 'new-access',
+        refresh_token: 'response-refresh-token',
+      }),
+    });
+    const xhr = new sandbox.XMLHttpRequest();
+    xhr.open('POST', REFRESH_URL);
+    xhr.setRequestHeader('Authorization', 'Basic c3RhdGljLWNyZWRz');
+    xhr.send(REQUEST_BODY);
+
+    expect(postedMessages).toHaveLength(0);
+    await new Promise((r) => setTimeout(r, 5));
+
+    expect(postedMessages).toHaveLength(1);
+    expect(postedMessages[0].data.type).toBe('FLEETEDGE_REFRESH_INTERCEPT');
+    expect(postedMessages[0].data.refreshToken).toBe('response-refresh-token');
+    expect(postedMessages[0].data.fleetId).toBe('FLEET-1');
+    expect(postedMessages[0].targetOrigin).toBe(ORIGIN);
+  });
+
+  it('falls back to the request body refresh_token when the response has none', async () => {
+    const { sandbox, postedMessages } = buildSandbox({
+      xhrStatus: 200,
+      xhrResponseText: JSON.stringify({ access_token: 'new-access' }),
+    });
+    const xhr = new sandbox.XMLHttpRequest();
+    xhr.open('POST', REFRESH_URL);
+    xhr.send(REQUEST_BODY);
+    await new Promise((r) => setTimeout(r, 5));
+
+    expect(postedMessages).toHaveLength(1);
+    expect(postedMessages[0].data.type).toBe('FLEETEDGE_REFRESH_INTERCEPT');
+    expect(postedMessages[0].data.refreshToken).toBe('request-refresh-token');
+  });
+
+  it('does NOT emit when the refresh response is non-2xx', async () => {
+    const { sandbox, postedMessages } = buildSandbox({
+      xhrStatus: 401,
+      xhrResponseText: JSON.stringify({ refresh_token: 'response-refresh-token' }),
+    });
+    const xhr = new sandbox.XMLHttpRequest();
+    xhr.open('POST', REFRESH_URL);
+    xhr.send(REQUEST_BODY);
+    await new Promise((r) => setTimeout(r, 5));
+    expect(postedMessages).toHaveLength(0);
+  });
+
+  it('does NOT emit for other /api/user-general/ paths', async () => {
+    const { sandbox, postedMessages } = buildSandbox({
+      xhrStatus: 200,
+      xhrResponseText: JSON.stringify({ refresh_token: 'response-refresh-token' }),
+    });
+    const xhr = new sandbox.XMLHttpRequest();
+    xhr.open('POST', `${ORIGIN}/api/user-general/some-other-endpoint`);
+    xhr.send(REQUEST_BODY);
+    await new Promise((r) => setTimeout(r, 5));
+    expect(postedMessages).toHaveLength(0);
+  });
+
+  it('does NOT emit for a cross-origin refresh URL', async () => {
+    const { sandbox, postedMessages } = buildSandbox({
+      xhrStatus: 200,
+      xhrResponseText: JSON.stringify({ refresh_token: 'response-refresh-token' }),
+    });
+    const xhr = new sandbox.XMLHttpRequest();
+    xhr.open('POST', 'https://evil.example/api/user-general/get-token-by-refresh-token');
+    xhr.send(REQUEST_BODY);
+    await new Promise((r) => setTimeout(r, 5));
+    expect(postedMessages).toHaveLength(0);
+  });
+});
+
+describe('networkSpy refresh-token capture (fetch)', () => {
+  const REFRESH_URL = `${ORIGIN}/api/user-general/get-token-by-refresh-token`;
+  const REQUEST_BODY = JSON.stringify({
+    fleet_id: 'FLEET-2',
+    is_tipper: false,
+    refresh_token: 'request-refresh-token',
+    req_by: 'PORTALS',
+  });
+
+  it('emits FLEETEDGE_REFRESH_INTERCEPT from the cloned response body on 2xx', async () => {
+    const { sandbox, postedMessages } = buildSandbox({
+      fetchOk: true,
+      fetchResponseBody: { access_token: 'new-access', refresh_token: 'response-refresh-token' },
+    });
+    await sandbox.window.fetch(REFRESH_URL, {
+      method: 'POST',
+      headers: { Authorization: 'Basic c3RhdGljLWNyZWRz' },
+      body: REQUEST_BODY,
+    });
+
+    expect(postedMessages).toHaveLength(1);
+    expect(postedMessages[0].data.type).toBe('FLEETEDGE_REFRESH_INTERCEPT');
+    expect(postedMessages[0].data.refreshToken).toBe('response-refresh-token');
+    expect(postedMessages[0].data.fleetId).toBe('FLEET-2');
+    expect(postedMessages[0].targetOrigin).toBe(ORIGIN);
+  });
+
+  it('falls back to the request body refresh_token when the response has none', async () => {
+    const { sandbox, postedMessages } = buildSandbox({
+      fetchOk: true,
+      fetchResponseBody: { access_token: 'new-access' },
+    });
+    await sandbox.window.fetch(REFRESH_URL, {
+      method: 'POST',
+      headers: { Authorization: 'Basic c3RhdGljLWNyZWRz' },
+      body: REQUEST_BODY,
+    });
+
+    expect(postedMessages).toHaveLength(1);
+    expect(postedMessages[0].data.refreshToken).toBe('request-refresh-token');
+  });
+
+  it('does NOT emit when the refresh response is not ok', async () => {
+    const { sandbox, postedMessages } = buildSandbox({
+      fetchOk: false,
+      fetchResponseBody: { refresh_token: 'response-refresh-token' },
+    });
+    await sandbox.window.fetch(REFRESH_URL, {
+      method: 'POST',
+      headers: { Authorization: 'Basic c3RhdGljLWNyZWRz' },
+      body: REQUEST_BODY,
+    });
+    expect(postedMessages).toHaveLength(0);
+  });
+
+  it('does NOT emit for a non-allow-listed refresh path', async () => {
+    const { sandbox, postedMessages } = buildSandbox({
+      fetchOk: true,
+      fetchResponseBody: { refresh_token: 'response-refresh-token' },
+    });
+    await sandbox.window.fetch(`${ORIGIN}/evil/api/user-general/get-token-by-refresh-token`, {
+      method: 'POST',
+      headers: { Authorization: 'Basic c3RhdGljLWNyZWRz' },
+      body: REQUEST_BODY,
+    });
     expect(postedMessages).toHaveLength(0);
   });
 });

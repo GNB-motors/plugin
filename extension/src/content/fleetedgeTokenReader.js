@@ -10,6 +10,7 @@
 
 let interceptedToken = null;
 let interceptedFleetId = null;
+let interceptedRefreshToken = null;
 
 // Origin lock for inbound postMessage intercepts (audit H-1). Only messages
 // from the FleetEdge page origin are accepted. The MAIN-world spy is
@@ -24,7 +25,19 @@ window.addEventListener('message', (event) => {
   // Origin check: reject forged messages claiming to be from a different
   // origin (e.g. a malicious userscript / other-extension MAIN-world script).
   if (event.origin !== FLEETEDGE_ORIGIN) return;
-  if (!event.data || event.data.type !== 'FLEETEDGE_INTERCEPT') return;
+  if (!event.data) return;
+
+  if (event.data.type === 'FLEETEDGE_REFRESH_INTERCEPT') {
+    // The MAIN-world spy captured a rotated refresh token from the
+    // Basic-auth get-token-by-refresh-token endpoint.
+    if (event.data.refreshToken) interceptedRefreshToken = event.data.refreshToken;
+    if (event.data.fleetId) interceptedFleetId = event.data.fleetId;
+
+    console.log('[FleetEdge Fuel Monitor] Intercepted refresh token from MAIN world network spy!');
+    return;
+  }
+
+  if (event.data.type !== 'FLEETEDGE_INTERCEPT') return;
 
   if (event.data.token) interceptedToken = event.data.token;
   if (event.data.fleetId) interceptedFleetId = event.data.fleetId;
@@ -76,6 +89,7 @@ function readFleetEdgeToken() {
       success: true,
       token: interceptedToken,
       fleetId: bestFleetId,
+      refreshToken: interceptedRefreshToken || null,
       exp: payload ? payload.exp : null,
       foundIn: 'live_network_intercept',
     };
