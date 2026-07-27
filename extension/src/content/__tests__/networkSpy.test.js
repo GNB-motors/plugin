@@ -184,3 +184,33 @@ describe('networkSpy fetch', () => {
     expect(postedMessages).toHaveLength(0);
   });
 });
+
+// ─── Regression: the FleetEdge SPA calls its API on a DIFFERENT origin ───
+// The page is https://fleetedge.home.tatamotors but the API it calls is
+// https://cvp.api.tatamotors (cross-origin, same-site — the browser sends
+// sec-fetch-site: same-site). A strict `u.origin !== window.location.origin`
+// check therefore rejects every real API call and the spy never fires.
+describe('networkSpy real FleetEdge API origin', () => {
+  const API_ORIGIN = 'https://cvp.api.tatamotors';
+
+  it('emits intercept for the cross-origin FleetEdge API host the SPA actually calls', async () => {
+    const { sandbox, postedMessages } = buildSandbox({ xhrStatus: 200 });
+    const xhr = new sandbox.XMLHttpRequest();
+    xhr.open('GET', `${API_ORIGIN}/api/vehicle-service/get-vin-for-dashboard`);
+    xhr.setRequestHeader('Authorization', 'Bearer real-token');
+    xhr.send();
+    await new Promise((r) => setTimeout(r, 5));
+    expect(postedMessages).toHaveLength(1);
+    expect(postedMessages[0].data.token).toBe('real-token');
+  });
+
+  it('still rejects an unrelated third-party host (audit H-2 must hold)', async () => {
+    const { sandbox, postedMessages } = buildSandbox({ xhrStatus: 200 });
+    const xhr = new sandbox.XMLHttpRequest();
+    xhr.open('GET', 'https://evil.example/api/vehicle-service/get-vin-for-dashboard');
+    xhr.setRequestHeader('Authorization', 'Bearer attacker-token');
+    xhr.send();
+    await new Promise((r) => setTimeout(r, 5));
+    expect(postedMessages).toHaveLength(0);
+  });
+});
