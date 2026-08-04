@@ -135,3 +135,60 @@ describe('fleetedgeTokenReader message listener (audit H-1)', () => {
     expect(result.success).toBe(false);
   });
 });
+
+describe('fleetedgeTokenReader refresh-token intercept', () => {
+  let r;
+  beforeEach(() => {
+    r = buildReader();
+    // Seed a valid live token so READ_FLEETEDGE_TOKEN returns the
+    // live_network_intercept success shape (which carries refreshToken).
+    const token = makeJwt({ exp: Math.floor(Date.now() / 1000) + 3600, fleet_id: 'FLEET-OK' });
+    r.dispatch({
+      source: r.sandbox.window,
+      origin: ORIGIN,
+      data: { type: 'FLEETEDGE_INTERCEPT', token, fleetId: 'FLEET-OK' },
+    });
+  });
+
+  it('stores a same-window FLEETEDGE_REFRESH_INTERCEPT from the FleetEdge origin and returns it', () => {
+    r.dispatch({
+      source: r.sandbox.window,
+      origin: ORIGIN,
+      data: { type: 'FLEETEDGE_REFRESH_INTERCEPT', refreshToken: 'rt-123', fleetId: 'FLEET-OK' },
+    });
+    const result = r.readToken();
+    expect(result.success).toBe(true);
+    expect(result.refreshToken).toBe('rt-123');
+    expect(result.fleetId).toBe('FLEET-OK');
+  });
+
+  it('returns refreshToken: null when no refresh intercept was received', () => {
+    const result = r.readToken();
+    expect(result.success).toBe(true);
+    expect(result.refreshToken).toBeNull();
+  });
+
+  it('REJECTS a forged-origin FLEETEDGE_REFRESH_INTERCEPT', () => {
+    r.dispatch({
+      source: r.sandbox.window,
+      origin: 'https://evil.example',
+      data: { type: 'FLEETEDGE_REFRESH_INTERCEPT', refreshToken: 'attacker-rt', fleetId: 'EVIL' },
+    });
+    const result = r.readToken();
+    expect(result.success).toBe(true);
+    expect(result.refreshToken).toBeNull();
+    expect(result.fleetId).toBe('FLEET-OK');
+  });
+
+  it('REJECTS a cross-window FLEETEDGE_REFRESH_INTERCEPT (event.source !== window)', () => {
+    r.dispatch({
+      source: { not: 'window' },
+      origin: ORIGIN,
+      data: { type: 'FLEETEDGE_REFRESH_INTERCEPT', refreshToken: 'attacker-rt', fleetId: 'EVIL' },
+    });
+    const result = r.readToken();
+    expect(result.success).toBe(true);
+    expect(result.refreshToken).toBeNull();
+    expect(result.fleetId).toBe('FLEET-OK');
+  });
+});

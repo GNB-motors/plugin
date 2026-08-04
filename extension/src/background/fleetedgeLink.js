@@ -330,7 +330,11 @@ async function _connectFleetEdgeInner({ expectedFleetId = null, expectedAccountI
   try {
     const response = await backendFetch('/fleetedge/link-token', {
       method: 'POST',
-      body: JSON.stringify({ token: captured.token, fleetId: captured.fleetId }),
+      body: JSON.stringify({
+        token: captured.token,
+        fleetId: captured.fleetId,
+        refreshToken: captured.refreshToken || null,
+      }),
     });
     const data = await response.json();
     const result = data.data;
