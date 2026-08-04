@@ -23,6 +23,15 @@
   window.__fe_spy_initialized = true;
 
   const TARGET_ORIGIN = window.location.origin;
+  // The FleetEdge SPA is served from fleetedge.home.tatamotors but calls its API
+  // on cvp.api.tatamotors — cross-origin, same-site (the browser sends
+  // sec-fetch-site: same-site). Locking the allow-list to window.location.origin
+  // alone therefore rejects every real API call and the spy never fires at all,
+  // so both origins are listed explicitly. Anything else is still rejected, so
+  // audit H-2 holds: a page script cannot point an XHR at a host of its choosing
+  // and have us upload the bearer token.
+  const FLEETEDGE_API_ORIGIN = 'https://cvp.api.tatamotors';
+  const ALLOWED_ORIGINS = [TARGET_ORIGIN, FLEETEDGE_API_ORIGIN];
   const ALLOWED_PATH_PREFIXES = [
     '/api/vehicle-service/',
     '/api/user-service/',
@@ -39,7 +48,7 @@
       // still gets allow-listed.
       const normalizedUrl = typeof rawUrl === 'string' ? rawUrl : String(rawUrl);
       const u = new URL(normalizedUrl, TARGET_ORIGIN);
-      if (u.origin !== TARGET_ORIGIN) return false;
+      if (!ALLOWED_ORIGINS.includes(u.origin)) return false;
       return ALLOWED_PATH_PREFIXES.some((p) => u.pathname.startsWith(p));
     } catch {
       return false;
