@@ -120,53 +120,51 @@ function decodeJwtPayload(token) {
   }
 }
 
+function newerByIat(a, b) {
+  if (!a) return b;
+  if (!b) return a;
+  const ia = decodeJwtPayload(a)?.iat;
+  const ib = decodeJwtPayload(b)?.iat;
+  if (!Number.isFinite(ia) || !Number.isFinite(ib)) return b; // prefer localStorage when unsure
+  return ia >= ib ? a : b;
+}
+
 async function readFleetEdgeToken() {
   // The SPA's localStorage always holds the current tokens, encrypted — this is
   // the only path that yields a FRESH refresh token on every read, including
   // right after a fresh login (no refresh call for the spy to intercept).
   const spa = await readSpaStorageTokens();
-  // Prefer the refresh token the spy just captured (it is by definition the
-  // newest rotation); otherwise the SPA's stored one.
-  const bestRefreshToken = interceptedRefreshToken || spa.refreshToken || null;
 
-  // If we intercepted a live token, parse it immediately and return it.
-  if (interceptedToken) {
-    const payload = decodeJwtPayload(interceptedToken);
+  // The MAIN-world spy may have captured a newer token during an in-flight
+  // network request. Compare by iat; fall back to the SPA value when unsure or
+  // when either token is not a decodable JWT. Without this comparison the spy's
+  // module-level `let`s can win with a stale value from an older session.
+  const bestAccessToken = newerByIat(interceptedToken, spa.token);
+  const bestRefreshToken = newerByIat(interceptedRefreshToken, spa.refreshToken);
+  const bestFleetId = interceptedFleetId || null;
 
-    // Always fall back to payload fleet_id if the intercept didn't catch a body with fleet_id
-    let bestFleetId = interceptedFleetId;
+  if (bestAccessToken) {
+    const payload = decodeJwtPayload(bestAccessToken);
+    let resolvedFleetId = bestFleetId;
     if (payload && payload.fleet_id) {
-      bestFleetId = payload.fleet_id;
+      resolvedFleetId = payload.fleet_id;
     }
-
-    if (!bestFleetId) {
-      bestFleetId = 'UNKNOWN_FLEET';
+    if (!resolvedFleetId) {
+      resolvedFleetId = 'UNKNOWN_FLEET';
     }
 
     return {
       success: true,
-      token: interceptedToken,
-      fleetId: bestFleetId,
+      token: bestAccessToken,
+      fleetId: resolvedFleetId,
       refreshToken: bestRefreshToken,
       exp: payload ? payload.exp : null,
-      foundIn: 'live_network_intercept',
+      foundIn: bestAccessToken === interceptedToken ? 'live_network_intercept' : 'spa_localstorage_decrypted',
     };
   }
 
-  // No live intercept: the decrypted SPA access token is the next-best source.
-  if (spa.token && decodeJwtPayload(spa.token)) {
-    const payload = decodeJwtPayload(spa.token);
-    return {
-      success: true,
-      token: spa.token,
-      fleetId: (payload && payload.fleet_id) || interceptedFleetId || 'UNKNOWN_FLEET',
-      refreshToken: bestRefreshToken,
-      exp: payload ? payload.exp : null,
-      foundIn: 'spa_localstorage_decrypted',
-    };
-  }
-
-  // Fallback to the old method ONLY if interception and SPA storage both fail
+  // No live intercept and no decryptable SPA access token: fall back to the old
+  // broad localStorage / sessionStorage scan.
   return fallbackLocalStorageScan();
 }
 

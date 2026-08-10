@@ -234,7 +234,10 @@ describe('fleetedgeTokenReader SPA localStorage decryption', () => {
     return btoa(String.fromCharCode(...new Uint8Array(ct)));
   }
 
-  it('returns the decrypted SPA tokens when nothing was intercepted', async () => {
+  it('decrypts what it encrypts — plumbing only, not constant verification', async () => {
+    // This test pins the decrypt plumbing against regression. It does NOT
+    // prove the AES constants match the live FleetEdge SPA bundle; that
+    // confirmation must be run once against a real browser (Part B step 3).
     const access = makeJwt({ exp: Math.floor(Date.now() / 1000) + 3600, fleet_id: 'FLEET-LS' });
     const refresh = makeJwt({ exp: Math.floor(Date.now() / 1000) + 86400 });
     const r = buildReader();
@@ -309,5 +312,52 @@ describe('fleetedgeTokenReader SPA localStorage decryption', () => {
     const result = await r.readToken();
     // No intercept, no decryptable SPA token → legacy scan finds nothing.
     expect(result.success).toBe(false);
+  });
+
+  it('prefers the SPA access token when the intercepted token is older by iat', async () => {
+    const now = Math.floor(Date.now() / 1000);
+    const oldAccess = makeJwt({ iat: now - 1000, exp: now + 3600, fleet_id: 'FLEET-OLD' });
+    const newAccess = makeJwt({ iat: now, exp: now + 3600, fleet_id: 'FLEET-NEW' });
+    const refresh = makeJwt({ exp: now + 86400 });
+    const r = buildReader();
+    const store = { token: await spaEncrypt(newAccess), refresh_token: await spaEncrypt(refresh) };
+    r.sandbox.localStorage = {
+      length: 2,
+      key: (i) => Object.keys(store)[i],
+      getItem: (k) => store[k] ?? null,
+    };
+    r.dispatch({
+      source: r.sandbox.window,
+      origin: ORIGIN,
+      data: { type: 'FLEETEDGE_INTERCEPT', token: oldAccess, fleetId: 'FLEET-OLD' },
+    });
+    const result = await r.readToken();
+    expect(result.success).toBe(true);
+    expect(result.token).toBe(newAccess);
+    expect(result.fleetId).toBe('FLEET-NEW');
+    expect(result.refreshToken).toBe(refresh);
+    expect(result.foundIn).toBe('spa_localstorage_decrypted');
+  });
+
+  it('prefers the newer refresh token by iat, regardless of source', async () => {
+    const now = Math.floor(Date.now() / 1000);
+    const oldRefresh = makeJwt({ iat: now - 1000, exp: now + 86400 });
+    const newRefresh = makeJwt({ iat: now, exp: now + 86400 });
+    const access = makeJwt({ exp: now + 3600, fleet_id: 'FLEET-OK' });
+    const r = buildReader();
+    const store = { token: await spaEncrypt(access), refresh_token: await spaEncrypt(newRefresh) };
+    r.sandbox.localStorage = {
+      length: 2,
+      key: (i) => Object.keys(store)[i],
+      getItem: (k) => store[k] ?? null,
+    };
+    r.dispatch({
+      source: r.sandbox.window,
+      origin: ORIGIN,
+      data: { type: 'FLEETEDGE_REFRESH_INTERCEPT', refreshToken: oldRefresh, fleetId: 'FLEET-OK' },
+    });
+    const result = await r.readToken();
+    expect(result.success).toBe(true);
+    expect(result.refreshToken).toBe(newRefresh);
   });
 });

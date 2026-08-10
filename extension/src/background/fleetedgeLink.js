@@ -32,6 +32,45 @@ export function withLinkLock(fn) {
   return next;
 }
 
+// ── durable retry queue for refresh-token rotations ───────────────────────────
+// Refresh tokens are single-use. If a rotation push fails (extension logged out,
+// offline, service worker torn down), the backend keeps a dead token. Keep one
+// pending rotation slot in chrome.storage.local; only the newest is worth saving
+// because older ones are already dead by definition. Flush on every successful
+// backend login, status-refresh alarm, and the next successful push.
+const PENDING_REFRESH_ROTATION_KEY = 'pendingRefreshRotation';
+
+async function getPendingRefreshRotation() {
+  const store = await getStorage([PENDING_REFRESH_ROTATION_KEY]);
+  return store[PENDING_REFRESH_ROTATION_KEY] || null;
+}
+
+async function setPendingRefreshRotation(record) {
+  return setStorage({ [PENDING_REFRESH_ROTATION_KEY]: record });
+}
+
+async function clearPendingRefreshRotation() {
+  return setStorage({ [PENDING_REFRESH_ROTATION_KEY]: null });
+}
+
+async function flushPendingRefreshRotation() {
+  const pending = await getPendingRefreshRotation();
+  if (!pending) return { success: true, flushed: false };
+  const { fleetId, refreshToken } = pending;
+  try {
+    await backendFetch('/fleetedge/refresh-token-rotated', {
+      method: 'POST',
+      body: JSON.stringify({ fleetId, refreshToken }),
+    });
+    await clearPendingRefreshRotation();
+    tokenTel.info('Pending rotated refresh token flushed to backend', { fleetId });
+    return { success: true, flushed: true };
+  } catch (err) {
+    tokenTel.warn('Failed to flush pending rotated refresh token', { fleetId, error: err.message });
+    return { success: false, error: err.message };
+  }
+}
+
 // H-3: Local JWT payload decode for sanity-checking owner identity only — no
 // signature verification (extension cannot hold the signing key).
 function decodeJwtPayloadUnsafe(token) {
@@ -342,6 +381,9 @@ async function _connectFleetEdgeInner({ expectedFleetId = null, expectedAccountI
     // Refresh full accounts list (already inside the link lock)
     const status = await _getFleetEdgeStatusInner();
 
+    // Backend is reachable — flush any rotation that failed while offline.
+    await flushPendingRefreshRotation();
+
     logger.info(`FleetEdge linked: ${result.vehicleCount} vehicles`);
     feTel.info('FleetEdge linked', {
       accountId: result.accountId,
@@ -371,18 +413,54 @@ async function _connectFleetEdgeInner({ expectedFleetId = null, expectedAccountI
  * always holds the current one.
  */
 export async function pushRotatedRefreshToken(fleetId, refreshToken) {
-  if (!fleetId || !refreshToken) return { success: false, error: 'fleetId and refreshToken required' };
-  try {
-    await backendFetch('/fleetedge/refresh-token-rotated', {
-      method: 'POST',
-      body: JSON.stringify({ fleetId, refreshToken }),
-    });
-    tokenTel.info('Rotated refresh token pushed to backend', { fleetId });
-    return { success: true };
-  } catch (err) {
-    tokenTel.warn('Failed to push rotated refresh token', { fleetId, error: err.message });
-    return { success: false, error: err.message };
+  if (!refreshToken) return { success: false, error: 'fleetId and refreshToken required' };
+
+  // The MAIN-world spy only sees a fleet_id when the intercepted request body
+  // carried one. A rotated refresh token is itself a Keycloak JWT whose payload
+  // carries fleet identity — decode it before giving up.
+  let resolvedFleetId = fleetId || null;
+  if (!resolvedFleetId) {
+    const payload = decodeJwtPayloadUnsafe(refreshToken);
+    resolvedFleetId = payload && (payload.fleet_id || payload.fleetId)
+      ? String(payload.fleet_id || payload.fleetId)
+      : null;
   }
+
+  if (!resolvedFleetId) {
+    tokenTel.warn('Cannot push rotated refresh token — no fleetId in message or JWT', {
+      refreshTokenPreview: refreshToken.slice(0, 20),
+    });
+    return { success: false, error: 'fleetId and refreshToken required' };
+  }
+
+  return withLinkLock(async () => {
+    // If a previous rotation failed to reach the backend, try to flush it first.
+    // Older rotations are dead; only the newest pending slot is kept, but if we
+    // have connectivity now we should still attempt to send what we have before
+    // it becomes useless.
+    await flushPendingRefreshRotation();
+
+    try {
+      await backendFetch('/fleetedge/refresh-token-rotated', {
+        method: 'POST',
+        body: JSON.stringify({ fleetId: resolvedFleetId, refreshToken }),
+      });
+      await clearPendingRefreshRotation();
+      tokenTel.info('Rotated refresh token pushed to backend', { fleetId: resolvedFleetId });
+      return { success: true };
+    } catch (err) {
+      await setPendingRefreshRotation({
+        fleetId: resolvedFleetId,
+        refreshToken,
+        at: Date.now(),
+      });
+      tokenTel.warn('Failed to push rotated refresh token; queued for retry', {
+        fleetId: resolvedFleetId,
+        error: err.message,
+      });
+      return { success: false, error: err.message };
+    }
+  });
 }
 
 /**
@@ -488,6 +566,9 @@ async function _getFleetEdgeStatusInner() {
     await setStorage({ fleetEdgeAccounts: accounts, fleetEdgePull: pull });
     updateBadge(accounts);
     notifyExpiredAccounts(accounts);
+
+    // Backend is reachable — flush any rotation that failed while offline.
+    await flushPendingRefreshRotation();
 
     feTel.debug('FleetEdge status fetched', { accountCount: accounts.length });
     return { accounts, pull };
