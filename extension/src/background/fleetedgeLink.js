@@ -365,6 +365,27 @@ async function _connectFleetEdgeInner({ expectedFleetId = null, expectedAccountI
 }
 
 /**
+ * Push a browser-side refresh-token rotation to the backend.
+ * Refresh tokens are single-use: the SPA's own refresh kills our stored copy.
+ * The content script forwards every rotation it intercepts so the backend
+ * always holds the current one.
+ */
+export async function pushRotatedRefreshToken(fleetId, refreshToken) {
+  if (!fleetId || !refreshToken) return { success: false, error: 'fleetId and refreshToken required' };
+  try {
+    await backendFetch('/fleetedge/refresh-token-rotated', {
+      method: 'POST',
+      body: JSON.stringify({ fleetId, refreshToken }),
+    });
+    tokenTel.info('Rotated refresh token pushed to backend', { fleetId });
+    return { success: true };
+  } catch (err) {
+    tokenTel.warn('Failed to push rotated refresh token', { fleetId, error: err.message });
+    return { success: false, error: err.message };
+  }
+}
+
+/**
  * Reconnect a specific account (same capture flow, backend upserts by userId+accountId).
  */
 export async function reconnectFleetEdgeAccount(accountId) {

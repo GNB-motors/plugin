@@ -19,6 +19,7 @@ import {
   reconnectFleetEdgeAccount,
   renameFleetEdgeAccount,
   resetNotifiedAccounts,
+  pushRotatedRefreshToken,
 } from './fleetedgeLink.js';
 import { getStorage, setStorage, removeStorage } from './utils.js';
 import { getLogs, clearLogs, createLogger } from './logger.js';
@@ -296,6 +297,12 @@ async function handleMessage(message) {
     case 'GET_FLEETEDGE_STATUS': {
       const status = await getCachedFleetEdgeStatus();
       return status;
+    }
+
+    case 'FLEETEDGE_REFRESH_ROTATED': {
+      // Content script intercepted a browser-side refresh-token rotation.
+      // Single-use tokens: push it so the backend's copy stays current.
+      return pushRotatedRefreshToken(message.fleetId, message.refreshToken);
     }
 
     // ─── Trigger backend processing (optional manual trigger) ──────────

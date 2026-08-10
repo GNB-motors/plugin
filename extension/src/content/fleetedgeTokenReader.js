@@ -33,6 +33,20 @@ window.addEventListener('message', (event) => {
     if (event.data.refreshToken) interceptedRefreshToken = event.data.refreshToken;
     if (event.data.fleetId) interceptedFleetId = event.data.fleetId;
 
+    // Refresh tokens are single-use: when the SPA rotates, the backend's stored
+    // copy dies on the spot (the 2026-08-07 fleet-wide outage). Forward every
+    // rotation to the background worker so the backend stays in sync instead of
+    // discovering the death at the next 48h expiry.
+    try {
+      chrome.runtime.sendMessage({
+        type: 'FLEETEDGE_REFRESH_ROTATED',
+        refreshToken: event.data.refreshToken || null,
+        fleetId: event.data.fleetId || null,
+      });
+    } catch {
+      // background worker unavailable — the next link still carries the token
+    }
+
     console.log('[FleetEdge Fuel Monitor] Intercepted refresh token from MAIN world network spy!');
     return;
   }
@@ -48,15 +62,51 @@ window.addEventListener('message', (event) => {
 // Listen for requests from the extension background script
 chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
   if (message.type === 'READ_FLEETEDGE_TOKEN') {
-    try {
-      const result = readFleetEdgeToken();
-      sendResponse(result);
-    } catch (err) {
-      sendResponse({ success: false, error: err.message });
-    }
+    readFleetEdgeToken()
+      .then((result) => sendResponse(result))
+      .catch((err) => sendResponse({ success: false, error: err.message }));
   }
-  return true; // Keep message channel open for async response if needed
+  return true; // Keep message channel open for the async response
 });
+
+// ─── SPA localStorage decryption ────────────────────────────────────────────
+// The FleetEdge SPA encrypts localStorage `token` / `refresh_token` with
+// AES-192-CBC; both constants are in its public JS bundle (environment.DKEY /
+// environment.DIV, see FLEETEDGE_API_DISCOVERY.md). Decrypting here is what
+// makes every link carry the CURRENT refresh token — the network spy only sees
+// a refresh token when the SPA happens to call the refresh endpoint while we
+// watch, which a fresh login never does. A link without a fresh refresh token
+// leaves the backend holding a stale single-use one (the 2026-08-07 outage).
+const SPA_LS_DKEY = 'cGx1dG9pc25vdGFjb21ldA==';
+const SPA_LS_DIV = 'ttlshiwwuruawshl';
+
+async function decryptSpaStorageValue(ciphertextB64) {
+  try {
+    if (!ciphertextB64 || typeof ciphertextB64 !== 'string') return null;
+    const keyBytes = new TextEncoder().encode(SPA_LS_DKEY);
+    const iv = new TextEncoder().encode(SPA_LS_DIV);
+    const key = await crypto.subtle.importKey('raw', keyBytes, { name: 'AES-CBC' }, false, [
+      'decrypt',
+    ]);
+    const data = Uint8Array.from(atob(ciphertextB64), (c) => c.charCodeAt(0));
+    const plain = await crypto.subtle.decrypt({ name: 'AES-CBC', iv }, key, data);
+    return new TextDecoder().decode(plain);
+  } catch {
+    return null;
+  }
+}
+
+/** The SPA's current tokens from localStorage, decrypted. Nulls when absent/undecryptable. */
+async function readSpaStorageTokens() {
+  const out = { token: null, refreshToken: null };
+  try {
+    out.token = await decryptSpaStorageValue(localStorage.getItem('token'));
+    out.refreshToken = await decryptSpaStorageValue(localStorage.getItem('refresh_token'));
+  } catch {
+    // localStorage inaccessible — leave nulls
+  }
+  return out;
+}
 
 function decodeJwtPayload(token) {
   try {
@@ -70,7 +120,15 @@ function decodeJwtPayload(token) {
   }
 }
 
-function readFleetEdgeToken() {
+async function readFleetEdgeToken() {
+  // The SPA's localStorage always holds the current tokens, encrypted — this is
+  // the only path that yields a FRESH refresh token on every read, including
+  // right after a fresh login (no refresh call for the spy to intercept).
+  const spa = await readSpaStorageTokens();
+  // Prefer the refresh token the spy just captured (it is by definition the
+  // newest rotation); otherwise the SPA's stored one.
+  const bestRefreshToken = interceptedRefreshToken || spa.refreshToken || null;
+
   // If we intercepted a live token, parse it immediately and return it.
   if (interceptedToken) {
     const payload = decodeJwtPayload(interceptedToken);
@@ -89,13 +147,26 @@ function readFleetEdgeToken() {
       success: true,
       token: interceptedToken,
       fleetId: bestFleetId,
-      refreshToken: interceptedRefreshToken || null,
+      refreshToken: bestRefreshToken,
       exp: payload ? payload.exp : null,
       foundIn: 'live_network_intercept',
     };
   }
 
-  // Fallback to the old method ONLY if intervention fails
+  // No live intercept: the decrypted SPA access token is the next-best source.
+  if (spa.token && decodeJwtPayload(spa.token)) {
+    const payload = decodeJwtPayload(spa.token);
+    return {
+      success: true,
+      token: spa.token,
+      fleetId: (payload && payload.fleet_id) || interceptedFleetId || 'UNKNOWN_FLEET',
+      refreshToken: bestRefreshToken,
+      exp: payload ? payload.exp : null,
+      foundIn: 'spa_localstorage_decrypted',
+    };
+  }
+
+  // Fallback to the old method ONLY if interception and SPA storage both fail
   return fallbackLocalStorageScan();
 }
 
