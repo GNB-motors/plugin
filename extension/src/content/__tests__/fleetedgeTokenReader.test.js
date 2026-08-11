@@ -12,10 +12,20 @@ import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
-const READER_SRC = fs.readFileSync(
-  path.join(__dirname, '..', 'fleetedgeTokenReader.js'),
-  'utf8'
-);
+
+// The reader is executed as raw source inside a vm sandbox, which has no module
+// loader — so its one ESM import (the AES-192-CBC fallback) is resolved here by
+// inlining that module's source instead. aes192cbc.js has its own dedicated
+// test; this only keeps the sandbox self-contained.
+const AES_SRC = fs
+  .readFileSync(path.join(__dirname, '..', 'aes192cbc.js'), 'utf8')
+  .replace(/^export /gm, '');
+const READER_SRC =
+  AES_SRC +
+  '\n' +
+  fs
+    .readFileSync(path.join(__dirname, '..', 'fleetedgeTokenReader.js'), 'utf8')
+    .replace(/^import\s+\{[^}]*\}\s+from\s+'\.\/aes192cbc\.js';\s*$/gm, '');
 
 const ORIGIN = 'https://fleetedge.home.tatamotors';
 
@@ -256,6 +266,44 @@ describe('fleetedgeTokenReader SPA localStorage decryption', () => {
     expect(result.token).toBe(access);
     expect(result.refreshToken).toBe(refresh);
     expect(result.fleetId).toBe('FLEET-LS');
+    expect(result.foundIn).toBe('spa_localstorage_decrypted');
+  });
+
+  it('still decrypts when the engine refuses AES-192, as Chromium does', async () => {
+    // The bug this guards: Chromium (Chrome AND Edge) implements AES-128 and
+    // AES-256 but not AES-192, so crypto.subtle.importKey throws on the SPA's
+    // 24-byte key. Node — and therefore every previous test and the original
+    // Playwright verification — DOES support AES-192, so the decrypt looked
+    // healthy everywhere except the one place it ran. Every link then fell back
+    // to the network spy, which only sees a refresh token when the SPA happens
+    // to call the refresh endpoint: fine on a long-lived tab, silently empty on
+    // a fresh login. Simulate the refusal and require the JS fallback to cover.
+    const access = makeJwt({ exp: Math.floor(Date.now() / 1000) + 3600, fleet_id: 'FLEET-CHROMIUM' });
+    const refresh = makeJwt({ exp: Math.floor(Date.now() / 1000) + 86400 });
+    const store = {
+      token: await spaEncrypt(access),
+      refresh_token: await spaEncrypt(refresh),
+    };
+    const r = buildReader();
+    r.sandbox.localStorage = {
+      length: 2,
+      key: (i) => Object.keys(store)[i],
+      getItem: (k) => store[k] ?? null,
+    };
+    r.sandbox.crypto = {
+      subtle: {
+        importKey: () => {
+          const err = new Error('192-bit AES keys are not supported');
+          err.name = 'NotSupportedError';
+          return Promise.reject(err);
+        },
+      },
+    };
+
+    const result = await r.readToken();
+    expect(result.success).toBe(true);
+    expect(result.token).toBe(access);
+    expect(result.refreshToken).toBe(refresh);
     expect(result.foundIn).toBe('spa_localstorage_decrypted');
   });
 

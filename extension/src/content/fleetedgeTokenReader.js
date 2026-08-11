@@ -8,6 +8,8 @@
  * triggered a network request yet.
  */
 
+import { decryptAes192Cbc } from './aes192cbc.js';
+
 let interceptedToken = null;
 let interceptedFleetId = null;
 let interceptedRefreshToken = null;
@@ -80,28 +82,60 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
 const SPA_LS_DKEY = 'cGx1dG9pc25vdGFjb21ldA==';
 const SPA_LS_DIV = 'ttlshiwwuruawshl';
 
+// Why the last decrypt failed. This function used to swallow every error, which
+// is how a permanently-broken decrypt stayed invisible for weeks: the link still
+// succeeded on a spy-captured access token and silently carried no refresh token.
+let lastDecryptError = null;
+
 async function decryptSpaStorageValue(ciphertextB64) {
+  lastDecryptError = null;
+  if (!ciphertextB64 || typeof ciphertextB64 !== 'string') {
+    lastDecryptError = 'absent from localStorage';
+    return null;
+  }
+  let data;
   try {
-    if (!ciphertextB64 || typeof ciphertextB64 !== 'string') return null;
-    const keyBytes = new TextEncoder().encode(SPA_LS_DKEY);
-    const iv = new TextEncoder().encode(SPA_LS_DIV);
+    data = Uint8Array.from(atob(ciphertextB64), (c) => c.charCodeAt(0));
+  } catch (err) {
+    lastDecryptError = `ciphertext is not base64 (${err.name})`;
+    return null;
+  }
+
+  const keyBytes = new TextEncoder().encode(SPA_LS_DKEY); // 24 bytes → AES-192
+  const iv = new TextEncoder().encode(SPA_LS_DIV);
+
+  // Fast path: let the engine do it. Works anywhere AES-192 is implemented.
+  let webCryptoError = null;
+  try {
     const key = await crypto.subtle.importKey('raw', keyBytes, { name: 'AES-CBC' }, false, [
       'decrypt',
     ]);
-    const data = Uint8Array.from(atob(ciphertextB64), (c) => c.charCodeAt(0));
     const plain = await crypto.subtle.decrypt({ name: 'AES-CBC', iv }, key, data);
     return new TextDecoder().decode(plain);
-  } catch {
+  } catch (err) {
+    // Chromium (Chrome AND Edge — same BoringSSL) ships AES-128 and AES-256 but
+    // not AES-192, so this throws NotSupportedError on the browsers we target.
+    webCryptoError = `${err.name}: ${err.message}`;
+  }
+
+  // Fallback: our own AES-192-CBC, unit-tested against Node's aes-192-cbc.
+  try {
+    return new TextDecoder().decode(decryptAes192Cbc(keyBytes, iv, data));
+  } catch (err) {
+    lastDecryptError = `webcrypto[${webCryptoError}] js[${err.message}]`;
     return null;
   }
 }
 
 /** The SPA's current tokens from localStorage, decrypted. Nulls when absent/undecryptable. */
 async function readSpaStorageTokens() {
-  const out = { token: null, refreshToken: null };
+  const out = { token: null, refreshToken: null, decryptError: null };
   try {
     out.token = await decryptSpaStorageValue(localStorage.getItem('token'));
     out.refreshToken = await decryptSpaStorageValue(localStorage.getItem('refresh_token'));
+    // Surface WHY the refresh token is missing — this is the value that decides
+    // whether a linked account can renew itself or dies at access-token expiry.
+    if (!out.refreshToken) out.decryptError = lastDecryptError || 'decrypt returned empty';
   } catch {
     // localStorage inaccessible — leave nulls
   }
@@ -160,12 +194,21 @@ async function readFleetEdgeToken() {
       refreshToken: bestRefreshToken,
       exp: payload ? payload.exp : null,
       foundIn: bestAccessToken === interceptedToken ? 'live_network_intercept' : 'spa_localstorage_decrypted',
+      decryptError: bestRefreshToken ? null : spa.decryptError,
     };
   }
 
   // No live intercept and no decryptable SPA access token: fall back to the old
-  // broad localStorage / sessionStorage scan.
-  return fallbackLocalStorageScan();
+  // broad localStorage / sessionStorage scan. That scan only ever hunted for an
+  // ACCESS token, so it returns no refreshToken — and a link that reports success
+  // while silently sending refreshToken:null is exactly how an account ends up
+  // stored with nothing to refresh with. Carry any refresh token we already hold
+  // across the fallback rather than dropping it on the floor.
+  const scanned = await fallbackLocalStorageScan();
+  if (scanned && scanned.success && !scanned.refreshToken) {
+    scanned.refreshToken = bestRefreshToken || null;
+  }
+  return scanned;
 }
 
 function fallbackLocalStorageScan() {

@@ -19,6 +19,11 @@ const feTel = createLayerLogger(LAYERS.FLEETEDGE);
 
 const MIN_TOKEN_TTL_SECONDS = 600; // 10 minutes
 
+const FLEETEDGE_ORIGIN = 'https://fleetedge.home.tatamotors';
+const FLEETEDGE_WILDCARD = `${FLEETEDGE_ORIGIN}/*`;
+const CVP_AUTH_ORIGIN = 'https://cvpauth.api.tatamotors';
+const CVP_AUTH_WILDCARD = `${CVP_AUTH_ORIGIN}/*`;
+
 // Track which accounts have already triggered a notification this session
 const _notifiedExpiredAccounts = new Set();
 
@@ -300,6 +305,39 @@ async function captureTabToken({ targetTabId = null, expectedFleetId = null } = 
   return { success: true, ...tokenResult };
 }
 
+/**
+ * Clear FleetEdge site data and close all FleetEdge tabs after a successful link.
+ *
+ * Why: the browser's SPA session is a second consumer of the single-use refresh
+ * token. If the tab stays open, its own refresh timer can rotate the token and
+ * invalidate the copy we just stored server-side. This is a purely LOCAL delete:
+ * it never calls a Keycloak/FleetEdge logout endpoint, so the server-side
+ * session (and our stored refresh token) stay alive.
+ */
+async function clearFleetEdgeSessionAndCloseTabs() {
+  let sessionCleared = false;
+  try {
+    await chrome.browsingData.remove(
+      { origins: [FLEETEDGE_ORIGIN, CVP_AUTH_ORIGIN] },
+      { cookies: true, localStorage: true }
+    );
+
+    const tabs = await chrome.tabs.query({ url: FLEETEDGE_WILDCARD });
+    const tabIds = tabs.map((t) => t.id).filter(Boolean);
+    if (tabIds.length) {
+      await chrome.tabs.remove(tabIds);
+    }
+
+    sessionCleared = true;
+    feTel.info('FleetEdge session cleared and tabs closed after link');
+  } catch (err) {
+    // Clearing failure must not fail the link — the token is already safely
+    // stored server-side. We just lose the tab-closing convenience.
+    feTel.warn('Failed to clear FleetEdge session after link', { error: err.message });
+  }
+  return { sessionCleared };
+}
+
 // ── public API ────────────────────────────────────────────────────────────────
 
 /**
@@ -384,6 +422,23 @@ async function _connectFleetEdgeInner({ expectedFleetId = null, expectedAccountI
     // Backend is reachable — flush any rotation that failed while offline.
     await flushPendingRefreshRotation();
 
+    // Only clear the browser session if we captured a refresh token. No refresh
+    // token means nothing to protect from SPA rotation; don't log the user out.
+    let sessionCleared = false;
+    const noRefreshToken = !captured.refreshToken;
+    if (captured.refreshToken) {
+      const clearResult = await clearFleetEdgeSessionAndCloseTabs();
+      sessionCleared = clearResult.sessionCleared;
+    } else {
+      // A link that stores no refresh token looks identical to a good one in the
+      // UI and dies silently when the 48h access token lapses. Say so, loudly.
+      feTel.warn('FleetEdge linked WITHOUT a refresh token — account cannot self-renew', {
+        accountId: result.accountId,
+        foundIn: captured.foundIn || null,
+        decryptError: captured.decryptError || null,
+      });
+    }
+
     logger.info(`FleetEdge linked: ${result.vehicleCount} vehicles`);
     feTel.info('FleetEdge linked', {
       accountId: result.accountId,
@@ -397,6 +452,8 @@ async function _connectFleetEdgeInner({ expectedFleetId = null, expectedAccountI
       vehicleCount: result.vehicleCount,
       expiresAt: result.expiresAt,
       accounts: status.accounts || [],
+      sessionCleared,
+      noRefreshToken,
     };
   } catch (err) {
     logger.error('Failed to link token:', err.message);

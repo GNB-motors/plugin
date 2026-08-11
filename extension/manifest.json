@@ -3,9 +3,12 @@
   "name": "gnbedge",
   "version": "0.0.0.4",
   "description": "Connects to your fleet telematics provider and audits fuel consumption tasks through your organization backend.",
-  "permissions": ["storage", "alarms", "notifications"],
+  "permissions": ["storage", "alarms", "notifications", "browsingData"],
   "host_permissions": ["https://api.app.gnbedge.in/*"],
-  "optional_host_permissions": ["https://fleetedge.home.tatamotors/*"],
+  "optional_host_permissions": [
+    "https://fleetedge.home.tatamotors/*",
+    "https://cvpauth.api.tatamotors/*"
+  ],
   "externally_connectable": {
     "matches": ["https://app.gnbedge.in/*", "https://main-frontend-wine.vercel.app/*"]
   },

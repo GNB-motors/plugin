@@ -1,4 +1,4 @@
-﻿/**
+/**
  * Edge Cases & Error Boundaries (CWS-compliant version)
  * Tests that need MOCKED module dependencies (backendApi, fleetedgeLink).
  *
@@ -120,7 +120,14 @@ describe('fleetedgeLink - edge cases', () => {
   });
 
   async function setupFleetedgeLink(opts = {}) {
-    const { tabsResult = [], sendMessageResult = null, backendFetchResult = null } = opts;
+    const {
+      tabsResult = [],
+      sendMessageResult = null,
+      backendFetchResult = null,
+      backendFetchError = null,
+      browsingDataRemoveResult = undefined,
+      browsingDataRemoveError = null,
+    } = opts;
     const STORE = {};
 
     vi.stubGlobal('chrome', {
@@ -143,6 +150,13 @@ describe('fleetedgeLink - edge cases', () => {
       tabs: {
         query: vi.fn(() => Promise.resolve(tabsResult)),
         sendMessage: vi.fn(() => Promise.resolve(sendMessageResult)),
+        remove: vi.fn(() => Promise.resolve()),
+      },
+      browsingData: {
+        remove: vi.fn(() => {
+          if (browsingDataRemoveError) return Promise.reject(browsingDataRemoveError);
+          return Promise.resolve(browsingDataRemoveResult);
+        }),
       },
       permissions: { contains: vi.fn(() => Promise.resolve(true)) },
       action: { setBadgeText: vi.fn(), setBadgeBackgroundColor: vi.fn() },
@@ -156,6 +170,7 @@ describe('fleetedgeLink - edge cases', () => {
     }));
     vi.doMock('../backendApi.js', () => ({
       backendFetch: vi.fn(() => {
+        if (backendFetchError) return Promise.reject(backendFetchError);
         if (backendFetchResult) {
           return Promise.resolve({
             json: () => Promise.resolve(backendFetchResult),
@@ -202,6 +217,102 @@ describe('fleetedgeLink - edge cases', () => {
     const result = await mod.connectFleetEdge();
     expect(result.success).toBe(true);
     expect(result.vehicleCount).toBe(15);
+  });
+
+  it('clears session and closes tabs after a successful link with a refresh token', async () => {
+    const mod = await setupFleetedgeLink({
+      tabsResult: [{ id: 42 }, { id: 99 }],
+      sendMessageResult: {
+        success: true,
+        token: 'eyJhbGciOiJSUzI1NiJ9.eyJmbGVldF9pZCI6IkYxMjMiLCJleHAiOjk5OTk5OTk5OTl9.sig',
+        refreshToken: 'refresh.jwt.token',
+        fleetId: 'F123',
+        exp: 9999999999,
+        foundIn: 'localStorage:kc-access',
+      },
+      backendFetchResult: { data: { success: true, vehicleCount: 15, expiresAt: 9999999999 } },
+    });
+    // With multiple tabs open, captureTabToken returns a picker. Re-invoke with a
+    // chosen tabId so the single-tab read succeeds and we still exercise closing
+    // all FleetEdge tabs (both the active tab and the other open one).
+    const picker = await mod.connectFleetEdge();
+    expect(picker.success).toBe(false);
+    expect(picker.needsTabPick).toBe(true);
+
+    const result = await mod.connectFleetEdge({ tabId: 42 });
+    expect(result.success).toBe(true);
+    expect(result.sessionCleared).toBe(true);
+    expect(chrome.browsingData.remove).toHaveBeenCalledWith(
+      {
+        origins: [
+          'https://fleetedge.home.tatamotors',
+          'https://cvpauth.api.tatamotors',
+        ],
+      },
+      { cookies: true, localStorage: true }
+    );
+    expect(chrome.tabs.query).toHaveBeenCalledWith({
+      url: 'https://fleetedge.home.tatamotors/*',
+    });
+    expect(chrome.tabs.remove).toHaveBeenCalledWith([42, 99]);
+  });
+
+  it('does not clear session when the link fails', async () => {
+    const mod = await setupFleetedgeLink({
+      tabsResult: [{ id: 42 }],
+      sendMessageResult: {
+        success: true,
+        token: 'eyJhbGciOiJSUzI1NiJ9.eyJmbGVldF9pZCI6IkYxMjMiLCJleHAiOjk5OTk5OTk5OTl9.sig',
+        refreshToken: 'refresh.jwt.token',
+        fleetId: 'F123',
+        exp: 9999999999,
+        foundIn: 'localStorage:kc-access',
+      },
+      backendFetchError: new Error('link rejected'),
+    });
+    const result = await mod.connectFleetEdge();
+    expect(result.success).toBe(false);
+    expect(chrome.browsingData.remove).not.toHaveBeenCalled();
+    expect(chrome.tabs.remove).not.toHaveBeenCalled();
+  });
+
+  it('does not clear session when no refresh token was captured', async () => {
+    const mod = await setupFleetedgeLink({
+      tabsResult: [{ id: 42 }],
+      sendMessageResult: {
+        success: true,
+        token: 'eyJhbGciOiJSUzI1NiJ9.eyJmbGVldF9pZCI6IkYxMjMiLCJleHAiOjk5OTk5OTk5OTl9.sig',
+        fleetId: 'F123',
+        exp: 9999999999,
+        foundIn: 'localStorage:kc-access',
+      },
+      backendFetchResult: { data: { success: true, vehicleCount: 15, expiresAt: 9999999999 } },
+    });
+    const result = await mod.connectFleetEdge();
+    expect(result.success).toBe(true);
+    expect(result.sessionCleared).toBe(false);
+    expect(chrome.browsingData.remove).not.toHaveBeenCalled();
+    expect(chrome.tabs.remove).not.toHaveBeenCalled();
+  });
+
+  it('still succeeds when browsingData.remove throws', async () => {
+    const mod = await setupFleetedgeLink({
+      tabsResult: [{ id: 42 }],
+      sendMessageResult: {
+        success: true,
+        token: 'eyJhbGciOiJSUzI1NiJ9.eyJmbGVldF9pZCI6IkYxMjMiLCJleHAiOjk5OTk5OTk5OTl9.sig',
+        refreshToken: 'refresh.jwt.token',
+        fleetId: 'F123',
+        exp: 9999999999,
+        foundIn: 'localStorage:kc-access',
+      },
+      backendFetchResult: { data: { success: true, vehicleCount: 15, expiresAt: 9999999999 } },
+      browsingDataRemoveError: new Error('permission denied'),
+    });
+    const result = await mod.connectFleetEdge();
+    expect(result.success).toBe(true);
+    expect(result.sessionCleared).toBe(false);
+    expect(chrome.tabs.remove).not.toHaveBeenCalled();
   });
 
   it('connectFleetEdge handles sendMessage error gracefully', async () => {

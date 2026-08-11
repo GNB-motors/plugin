@@ -769,7 +769,10 @@ export default function Popup() {
 
           case 'connectAccount': {
             const granted = await chrome.permissions.request({
-              origins: ['https://fleetedge.home.tatamotors/*'],
+              origins: [
+                'https://fleetedge.home.tatamotors/*',
+                'https://cvpauth.api.tatamotors/*',
+              ],
             });
             if (!granted) {
               showToast('Permission denied — allow access to the fleet portal', 'err');
@@ -783,7 +786,19 @@ export default function Popup() {
             if (res.success) {
               setTabPicker(null);
               setTabPickerSelected(null);
-              showToast(`Connected ✓ (${res.vehicleCount ?? 0} vehicles)`, 'ok');
+              if (res.noRefreshToken) {
+                showToast(
+                  'Connected, but NO refresh token was captured — this account will die when its access token lapses. Reload FleetEdge, wait for the map to load, then connect again.',
+                  'err'
+                );
+              } else if (res.sessionCleared) {
+                showToast(
+                  'Connected ✓ — FleetEdge tab closed and signed out locally; log in again anytime.',
+                  'ok'
+                );
+              } else {
+                showToast(`Connected ✓ (${res.vehicleCount ?? 0} vehicles)`, 'ok');
+              }
               await refreshStatus();
             } else if (res.needsTabPick) {
               // G-1: Background found multiple tabs — surface a chooser modal.
@@ -798,7 +813,10 @@ export default function Popup() {
           case 'reconnectAccount': {
             const { accountId } = payload;
             const granted = await chrome.permissions.request({
-              origins: ['https://fleetedge.home.tatamotors/*'],
+              origins: [
+                'https://fleetedge.home.tatamotors/*',
+                'https://cvpauth.api.tatamotors/*',
+              ],
             });
             if (!granted) {
               showToast('Permission denied', 'err');
@@ -807,7 +825,14 @@ export default function Popup() {
             showToast('Reconnecting…');
             const res = await chrome.runtime.sendMessage({ type: 'RECONNECT_ACCOUNT', accountId });
             if (res.success) {
-              showToast('Reconnected ✓', 'ok');
+              if (res.sessionCleared) {
+                showToast(
+                  'Reconnected ✓ — FleetEdge tab closed and signed out locally; log in again anytime.',
+                  'ok'
+                );
+              } else {
+                showToast('Reconnected ✓', 'ok');
+              }
               setDismissedBanners((prev) => {
                 const s = new Set(prev);
                 s.delete(accountId);
