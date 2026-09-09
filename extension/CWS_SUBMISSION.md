@@ -32,6 +32,7 @@ Permissions used
 • storage — saves your sign-in state and configuration locally
 • alarms — schedules a 2-minute background status refresh
 • notifications — alerts you when your fleet portal session expires
+• browsingData — clears your fleet portal session data after linking, so the portal tab cannot invalidate the connection you just made (that site only)
 • Host access to api.app.gnbedge.in — your organization backend (HTTPS)
 • Fleet portal access — requested only when you click Connect Fleet Portal (optional permission, not granted at install)
 
@@ -64,6 +65,8 @@ Bridges an authorized fleet telematics session with the user's organization back
 | `storage` | Persists the user's sign-in token, backend URL, and last-seen task counts locally so the popup can render quickly and the service worker can resume after restarts. |
 | `alarms` | Schedules a 2-minute periodic background refresh that polls the user's organization backend for task status and token validity. |
 | `notifications` | Alerts the user when their fleet portal session token expires (~24h) so they know to reconnect. |
+| `browsingData` | After the user links their fleet portal account, the extension clears the site data for the fleet portal origins only — `chrome.browsingData.remove({ origins: [...] }, { cookies: true, localStorage: true })`. This is required for correctness, not cleanup: the portal's own web app holds the same single-use session token and its refresh timer will rotate and invalidate the copy the user just linked, silently breaking the integration. The call is scoped to two origins; browsing history, cache, downloads and all other sites are never touched, and the deletion is purely local — no logout endpoint is called. |
+| Optional host: `https://cvpauth.api.tatamotors/*` | **Requested at runtime only — not granted at install**, together with the fleet portal host and behind the same explicit "Connect Fleet Portal" click. This is the fleet portal's authentication origin, which holds the other half of the session state; it must be cleared alongside the portal origin for the reason given under `browsingData`. No content script runs here and no request is made to it. |
 | Host: `https://api.app.gnbedge.in/*` | The user's organization backend. The extension sends authentication requests, retrieves task status, and forwards the fleet portal token here. All traffic is HTTPS. The manifest also declares `externally_connectable` for `https://app.gnbedge.in/*` (production web app) and `https://main-frontend-wine.vercel.app/*` (development frontend); these origins can send a single `{ type: "PING" }` message during the user onboarding flow so the web app can detect that the extension is installed. The extension responds only with `{ ok: true, version }` and exposes no user data or authenticated state via this channel. |
 | Optional host: `https://fleetedge.home.tatamotors/*` | **Requested at runtime only — not granted at install.** The user must explicitly click "Connect Fleet Portal" to trigger the permission prompt. Once granted, two declared content scripts run on this host: one reads the user's existing authenticated session token from the page's network requests (MAIN world), and passes it to the extension's isolated context, which forwards it to the user's backend. The extension never injects data, never reads other sites, and the host is never accessed without an explicit user action. |
 
@@ -112,8 +115,8 @@ All regions, OR restrict to India if this is an internal-only tool.
 | Asset | Size | Required? | Status |
 |---|---|---|---|
 | Icon 128×128 | 128×128 PNG | Yes (already in zip) | ✅ |
-| Screenshot | 1280×800 or 640×400 PNG/JPEG | Yes (1–5) | ⚠️ TODO |
-| Small promo tile | 440×280 PNG/JPEG | Yes | ⚠️ TODO |
+| Screenshot | 1280×800 or 640×400 PNG/JPEG | Yes (1–5) | ✅ `cws-screenshot-login.png`, `cws-screenshot-dashboard.png` — both 640×400, verified |
+| Small promo tile | 440×280 PNG/JPEG | Yes | ✅ `cws-promo-tile-440x280.png` — 440×280, verified |
 | Marquee promo tile | 1400×560 | Optional | skip |
 
 See `screenshot-instructions.txt` for the fastest way to produce these.

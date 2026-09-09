@@ -2,6 +2,45 @@
 
 ---
 
+## [2026-09-09] — branch: feat/auto-clear-and-close (manifest 0.0.0.3 → 0.0.0.4)
+
+### Clear the FleetEdge session after linking, and decrypt the SPA token without WebCrypto
+
+#### Why the session is cleared
+The browser's FleetEdge SPA is a second consumer of the same single-use refresh
+token. If its tab stays open after a link, its own refresh timer rotates the
+token and invalidates the copy we just stored server-side. After a successful
+link the extension now clears FleetEdge site data and closes those tabs. This is
+a purely **local** delete — it never calls a FleetEdge/Keycloak logout endpoint,
+so the server-side session and our stored refresh token both stay alive.
+
+#### manifest.json
+- **`permissions`** added `browsingData` — required for the origin-scoped
+  `chrome.browsingData.remove({ origins: [...] }, { cookies, localStorage })`
+  call above. Scoped to the two FleetEdge origins; no history, cache, or
+  downloads are touched, and no other site is affected.
+- **`optional_host_permissions`** added `https://cvpauth.api.tatamotors/*` — the
+  FleetEdge auth origin holds half of the session state, so it must be cleared
+  alongside the portal origin. Optional, like the portal host: not granted at
+  install, only after the user clicks "Connect Fleet Portal".
+- **`version`** bumped `0.0.0.3` → `0.0.0.4` (CWS rejects same-version re-uploads).
+
+#### src/content/aes192cbc.js (new)
+Pure-JS AES-192-CBC fallback for reading the SPA's encrypted localStorage token.
+WebCrypto's `subtle` does not implement AES-192, so the previous reader failed on
+exactly the token it existed to read.
+
+#### src/background/fleetedgeLink.js
+`clearFleetEdgeSessionAndCloseTabs()` runs after a successful link. A failure to
+clear never fails the link — the token is already stored server-side; only the
+tab-closing convenience is lost.
+
+#### CWS submission notes
+`browsingData` is a new permission and will draw a review question. Justification
+text is in `CWS_SUBMISSION.md` § "Permission justifications".
+
+---
+
 ## [2026-05-26] — branch: feat/externally-connectable-onboarding
 
 ### Web onboarding can now detect the extension (manifest 0.0.0.2 → 0.0.0.3)

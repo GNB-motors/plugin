@@ -10,7 +10,7 @@
 
 const fs = require('fs');
 const path = require('path');
-const { execFileSync } = require('child_process');
+const { zipDirectory } = require('./zip-dir.cjs');
 
 const ROOT = path.resolve(__dirname, '..');
 const DIST = path.join(ROOT, 'dist');
@@ -31,28 +31,13 @@ if (fs.existsSync(zipPath)) {
   fs.unlinkSync(zipPath);
 }
 
-// Use PowerShell Compress-Archive on Windows, zip on Unix
-const isWin = process.platform === 'win32';
-
 try {
-  if (isWin) {
-    // Pass args as array; PowerShell -Command receives a single script block
-    // built from a static template, with paths interpolated via -ArgumentList.
-    // Equivalent: Compress-Archive -Path <DIST>\* -DestinationPath <zipPath> -Force
-    const psScript =
-      "param($src,$dst) Compress-Archive -Path (Join-Path $src '*') -DestinationPath $dst -Force";
-    execFileSync(
-      'powershell',
-      ['-NoProfile', '-Command', psScript, '-src', DIST, '-dst', zipPath],
-      { stdio: 'inherit' }
-    );
-  } else {
-    execFileSync('zip', ['-r', zipPath, '.'], { stdio: 'inherit', cwd: DIST });
-  }
+  const names = zipDirectory(DIST, zipPath);
 
   const stats = fs.statSync(zipPath);
   const sizeKB = (stats.size / 1024).toFixed(1);
-  console.log(`\n✓ Created ${zipName} (${sizeKB} KB)`);
+  console.log(`
+✓ Created ${zipName} (${sizeKB} KB, ${names.length} files)`);
   console.log(`  Load in Chrome: chrome://extensions → Load unpacked → select extracted folder`);
 } catch (err) {
   console.error('Failed to create zip:', err.message);
