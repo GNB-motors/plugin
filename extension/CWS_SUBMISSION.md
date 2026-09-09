@@ -115,11 +115,18 @@ All regions, OR restrict to India if this is an internal-only tool.
 | Asset | Size | Required? | Status |
 |---|---|---|---|
 | Icon 128×128 | 128×128 PNG | Yes (already in zip) | ✅ |
-| Screenshot | 1280×800 or 640×400 PNG/JPEG | Yes (1–5) | ✅ `cws-screenshot-login.png`, `cws-screenshot-dashboard.png` — both 640×400, verified |
+| Screenshot | 1280×800 or 640×400 PNG/JPEG | Yes (1–5) | ✅ `cws-screenshot-login.png`, `cws-screenshot-dashboard.png` — both 1280×800, verified |
 | Small promo tile | 440×280 PNG/JPEG | Yes | ✅ `cws-promo-tile-440x280.png` — 440×280, verified |
 | Marquee promo tile | 1400×560 | Optional | skip |
 
-See `screenshot-instructions.txt` for the fastest way to produce these.
+Regenerate all three with `npm run build:screenshots` — it renders the real
+built popup (`dist/`) behind a stubbed `chrome` API and frames it, so the assets
+track the UI instead of drifting. The earlier hand-drawn mockups had gone stale:
+they showed a logo, tagline and button the popup no longer has. Seeded demo data
+only — no real operator name or fleet id goes into a public listing asset.
+
+`screenshot-instructions.txt` documents the older manual route (Canva/Figma) and
+is kept only as a fallback.
 
 ---
 
