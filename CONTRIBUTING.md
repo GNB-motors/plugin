@@ -13,12 +13,12 @@ npm install
 
 ## Development Workflow
 
-1. **Branch from `main`** (or `Devayan` for active development)
+1. **Branch from `main`** — see `AGENTS.md` for the current branch strategy; `Devayan` and `plugin` are older, superseded lines, do not branch off either
 2. **Make your change** with tests
 3. **Run quality gates locally**:
    ```bash
    npm run lint      # ESLint
-   npm test          # Vitest (187 tests)
+   npm test          # Vitest (277 tests, 2 skipped)
    npm run build     # Production build
    npm run check:security  # Manifest + secrets + audit
    ```

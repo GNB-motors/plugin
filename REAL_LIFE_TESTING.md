@@ -2,6 +2,18 @@
 
 > **For the team:** Follow this guide top-to-bottom to do a full end-to-end test of the Chrome extension + local backend server.
 
+> **This tests the legacy, disabled task-polling pipeline — not the shipped architecture.**
+> The flow below (extension calls FleetEdge directly, resolves a registration number to a
+> VIN, POSTs results back) is **Pipeline A**, which `extension/README.md` documents as
+> returning `410` on the real backend unless `FEATURE_EXTENSION_TASK_POLLING=true` is set
+> (it isn't, by default). The shipped extension links a FleetEdge account once via a
+> declared content script, and a backend cron does all the FleetEdge calling and fuel-variance
+> computation server-side — the extension is never involved in a per-task fetch. There is
+> currently no local mock backend for that flow; testing it means pointing a build at a real
+> (dev) backend per `extension/README.md`'s "Install · develop · build" section. This guide is
+> kept because the mock server below still exercises real extension code paths (login, task
+> polling loop, error handling), just not the ones live traffic uses today.
+
 ---
 
 ## What This Test Does

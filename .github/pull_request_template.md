@@ -27,7 +27,7 @@
 
 ## How I tested
 
-- [ ] `npm test` passes locally (187 tests)
+- [ ] `npm test` passes locally (277 tests, 2 skipped)
 - [ ] `npm run lint` passes
 - [ ] `npm run build` produces a clean `dist/`
 - [ ] Loaded `dist/` into Chrome and verified the affected flow end-to-end

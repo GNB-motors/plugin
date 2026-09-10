@@ -2,6 +2,71 @@
 
 ---
 
+## [2026-09-10] — branch: main (no version bump — packaging + tooling only)
+
+### Fixed the release pipeline that 0.0.0.4 exposed, and stopped it from drifting again
+
+The 0.0.0.4 manifest bump (previous entry) had never actually been packaged or
+pushed — `main` was missing that commit until this session, and packaging it
+surfaced three real bugs.
+
+#### scripts/build-zip.cjs, scripts/zip-dir.cjs (new)
+`build-zip.cjs` shelled out to `powershell -Command <script> -src X -dst Y` —
+but `-Command` takes one script string and appends everything after it as
+literal text, so `param($src,$dst)` never bound and `Join-Path` got `null`.
+Packaging failed outright. `Compress-Archive` was also the wrong tool even
+once that was fixed: Windows PowerShell 5.1 writes `\` as the in-archive path
+separator, which is out of ZIP spec and not something the Chrome Web Store is
+reliably tolerant of — the 0.0.0.3 zip that actually shipped has `/`. Replaced
+both with `zip-dir.cjs`, a dependency-free ZIP writer (`zip` isn't installed on
+Windows; GNU tar can't write ZIPs). Verified: the rebuilt archive extracts
+byte-for-byte identical to `dist/`, `unzip -t` clean, forward slashes.
+
+#### The manifest-version check needed a tag, not just git history
+`check-manifest-policy.cjs`'s monotonic-version check compares against
+`git describe --tags --abbrev=0`, falling back to `HEAD~1:extension/manifest.json`.
+No tag existed, and two consecutive commits both carried `0.0.0.4` (the feature
+commit, then this session's packaging commit), so the `HEAD~1` fallback
+compared `0.0.0.4` against itself and failed with nothing real to fix. Tagged
+`v0.0.0.3` at the last commit actually submitted to CWS (`ef25334`) — the
+check's own intended baseline — rather than weakening the check.
+
+#### .env.production (new), .env.example (corrected)
+Release builds must not inherit a dev-box URL. `vite.config.js` derives
+`host_permissions` from `VITE_BACKEND_BASE_URL`, so a build that read the
+local `.env` (pointed at the dev box) would ship that host in the manifest to
+the Web Store — the only reason the first 0.0.0.4 zip avoided this was that
+`.env` was moved aside by hand before building. `.env.production` (committed,
+`https://api.app.gnbedge.in/v1`, no secrets) is loaded by Vite in production
+mode and overrides `.env`, so `npm run build` / `build:zip` are now correct by
+default; `npm run dev` is unaffected. Verified with `.env` still pointed at the
+dev box: a plain build emitted the prod URL and only the prod host in
+`host_permissions`.
+
+Also corrected `.env.example`, which documented five keys
+(`VITE_POLL_INTERVAL_MINUTES`, `VITE_INTER_TASK_DELAY_MS`,
+`VITE_VIN_CACHE_TTL_HOURS`, `VITE_TOKEN_EXPIRY_BUFFER_SECONDS`,
+`VITE_SEARCH_WINDOW_MINUTES`) that no source file reads. The polling knob the
+code actually reads is `VITE_STATUS_POLL_INTERVAL_MINUTES` — the documented
+name silently did nothing.
+
+#### scripts/build-screenshots.cjs (new)
+The Chrome Web Store screenshots and promo tile were hand-written HTML
+mockups that had drifted from the real popup — showing a logo, tagline, and
+button style the UI no longer has, and (on the dashboard shot) a real fleet
+identifier baked into a public listing image. Replaced with a script that
+renders the real built popup (`dist/`) behind a stubbed `chrome` API and
+frames it, so the assets track the UI instead of drifting. Run via
+`npm run build:screenshots`. Seeded with synthetic account/user data on
+purpose — these are public images.
+
+#### Verification
+`check:manifest` and `check:secrets` pass; 277 tests / 2 skipped; lint clean;
+`npm audit --omit=dev` reports 0 vulnerabilities; the packaged zip round-trips
+`dist/` byte-for-byte with no dev host anywhere in it.
+
+---
+
 ## [2026-09-09] — branch: feat/auto-clear-and-close (manifest 0.0.0.3 → 0.0.0.4)
 
 ### Clear the FleetEdge session after linking, and decrypt the SPA token without WebCrypto

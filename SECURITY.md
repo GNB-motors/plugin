@@ -35,7 +35,7 @@ Only the latest released version on the Chrome Web Store receives security updat
 
 ## Security Measures in Place
 
-- **Manifest V3** with minimal permissions (`storage`, `alarms`, `notifications`)
+- **Manifest V3** with minimal permissions (`storage`, `alarms`, `notifications`, `browsingData`)
 - **No `webRequest`, `scripting`, or `tabs` permissions**
 - All FleetEdge API calls happen **server-side** via the backend
 - Content scripts use the **declared** (not programmatic) injection model
@@ -45,4 +45,5 @@ Only the latest released version on the Chrome Web Store receives security updat
 ## Known Security Considerations
 
 - The extension reads JWT tokens from `fleetedge.home.tatamotors` via a declared content script. Users must explicitly grant this host permission at runtime.
+- `browsingData` is used for exactly one origin-scoped call, after a successful FleetEdge link — clearing cookies/localStorage for the FleetEdge and `cvpauth.api.tatamotors` origins only, never browsing history, cache, or any other site. See `extension/README.md`, "Clearing the FleetEdge session after linking".
 - Backend tokens are stored in `chrome.storage.local` and transmitted via `Authorization: Bearer` headers.

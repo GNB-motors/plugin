@@ -2,7 +2,10 @@
 
 > **Target audience:** Engineers working on the Chrome extension, local test server, or backend integration.
 >
-> **Last updated:** 2026-05-13 | **Commit:** 65de906
+> **Last updated:** 2026-05-13 | **Commit:** 65de906 (partially refreshed 2026-09-10 — version
+> numbers, env config, branch strategy, and the testing-strategy table were corrected; other
+> sections may still describe the pre-multi-account architecture. `extension/README.md` is the
+> current source of truth for anything not covered here.)
 
 ---
 
@@ -37,7 +40,7 @@ chrome --version  # >= 109.0.0
 
 ```bash
 # Clone / navigate to project
-cd /home/devayan/Desktop/gnb/plugin/plugin
+cd plugin       # the repo root — wherever you cloned/unzipped it
 
 # Install extension dependencies
 cd extension
@@ -56,18 +59,20 @@ cp .env.example .env
 # Edit .env with your settings
 ```
 
-**Required for development:**
+**For development** — set your backend URL in `.env`, e.g.:
 
 ```env
-VITE_BACKEND_BASE_URL=http://localhost:3000
+VITE_BACKEND_BASE_URL=http://localhost:3000/v1
 ```
 
-**Required for production builds:**
+The `/v1` suffix is required — the real API 405s without it (the API version
+lives in the path, not a header).
 
-```env
-VITE_BACKEND_BASE_URL=https://api.app.gnbedge.in
-VITE_STATUS_POLL_INTERVAL_MINUTES=2
-```
+**For production builds — you don't set this yourself.** `extension/.env.production`
+is committed and points at `https://api.app.gnbedge.in/v1`; Vite loads it in
+production mode and it overrides whatever `.env` says. `npm run build` /
+`build:zip` are safe by default even if `.env` still points at a dev box —
+see `extension/README.md`, "Install · develop · build".
 
 ---
 
@@ -83,10 +88,13 @@ The single source of truth for Chrome about what this extension is and what it c
 {
   "manifest_version": 3,
   "name": "gnbedge",
-  "version": "0.0.0.1",
-  "permissions": ["storage", "alarms", "notifications"],
+  "version": "0.0.0.4",
+  "permissions": ["storage", "alarms", "notifications", "browsingData"],
   "host_permissions": ["https://api.app.gnbedge.in/*"],
-  "optional_host_permissions": ["https://fleetedge.home.tatamotors/*"],
+  "optional_host_permissions": [
+    "https://fleetedge.home.tatamotors/*",
+    "https://cvpauth.api.tatamotors/*"
+  ],
   "background": {
     "service_worker": "src/background/index.js",
     "type": "module"
@@ -142,19 +150,15 @@ The single source of truth for Chrome about what this extension is and what it c
 
 ### Branch Strategy
 
-```
-main           ← production-ready, tagged releases
-  ↓
-Devayan        ← active development branch
-  ↓
-feature/*      ← individual features
-```
+This diagram is stale — see `AGENTS.md`'s "Active branches" for the current,
+correct picture. Short version: feature branches (`feat/<slug>`, `fix/<slug>`,
+etc.) branch directly off `main` and PR back to `main`. `Devayan` and `plugin`
+are older lines that fed into `main` historically; **do not branch off either.**
 
 ### Daily Development Loop
 
 ```bash
-# 1. Start local test server (terminal 1)
-cd /home/devayan/Desktop/gnb/plugin/plugin
+# 1. Start local test server (terminal 1) — from the repo root
 npm start
 
 # 2. Start extension dev server (terminal 2)
@@ -186,11 +190,15 @@ npm test
 ### Testing Against Real Backend
 
 ```bash
-# Switch to production backend
-echo 'VITE_BACKEND_BASE_URL=https://api.app.gnbedge.in' > extension/.env
+# Switch your local .env to a real backend (dev box or prod)
+echo 'VITE_BACKEND_BASE_URL=https://your-backend.example.com/v1' > extension/.env
 cd extension && npm run build
 # Load dist/ folder in chrome://extensions/
 ```
+
+To test specifically against **prod**, you don't need to touch `.env` at all —
+`npm run build` already targets prod via the committed `.env.production` (see
+"Environment Configuration" above).
 
 ---
 
@@ -295,18 +303,13 @@ try {
 
 ### Test Architecture
 
-| File | Tests | What It Covers |
-|------|------:|----------------|
-| `utils.test.js` | 16 | Storage wrappers, JWT decode, normalization |
-| `logger.test.js` | 6 | Logger creation, log retrieval, clear |
-| `backendApi.test.js` | 20 | Login, logout, fetch, timeout, 401 handling |
-| `telemetry.test.js` | 45 | LEMU: record, ship, breadcrumbs, health |
-| `integration.test.js` | 10 | Auth → status → FleetEdge link flow |
-| `edge-cases-integration.test.js` | 10 | Timeouts, 401 clears, link edge cases |
-| `edge-cases-utils.test.js` | 46 | Null inputs, boundaries, malformed data |
-| `edge-cases-v2.test.js` | 30 | Additional edge case coverage |
+See `extension/TESTING.md` for the authoritative, current table (12 files,
+covering `src/background/`, `src/content/`, and `src/popup/` — this table
+covered only `background/` and had drifted from the real per-file counts).
 
-**Total:** 183 tests (187 with 2 skipped backendUrl tests + 2 pending)
+**Total: 277 tests pass, 2 skipped** (the same two "custom `backendUrl` from
+storage" cases skipped intentionally, in `backendApi.test.js` and
+`integration.test.js`).
 
 ### Running Tests
 
@@ -474,8 +477,12 @@ chrome.runtime.sendMessage({ type: 'GET_HEALTH' })
 
 1. Update version in `extension/manifest.json`
 2. Update `extension/CHANGELOG.md`
-3. Commit: `git commit -m "chore(release): bump v0.0.0.2"`
-4. Tag: `git tag -a v0.0.0.2 -m "Release v0.0.0.2"`
+3. Commit: `git commit -m "chore(release): bump vX.Y.Z"`
+4. **Tag the commit you actually submit to CWS**: `git tag -a vX.Y.Z -m "Release vX.Y.Z"`.
+   This isn't optional bookkeeping — `check-manifest-policy.cjs`'s monotonic-version check
+   reads `git describe --tags --abbrev=0` first and only falls back to `HEAD~1` if no tag
+   exists. Skip the tag and a same-version follow-up commit (e.g. a docs fix after the
+   release commit) makes the check compare a version against itself and fail on nothing real.
 5. Push: `git push origin main --tags`
 
 ### Build Checklist
@@ -495,9 +502,12 @@ npm run build
 # 4. Verify manifest in dist/
 cat dist/manifest.json | grep version
 
-# 5. Package
+# 5. Package (Node zip writer — no PowerShell/zip dependency; forward slashes, not backslashes)
 npm run build:zip
-# Output: extension-v0.0.0.2.zip
+# Output: extension-vX.Y.Z.zip, matching manifest.json's version
+
+# 6. Regenerate the CWS screenshots + promo tile from the real built popup, if the UI changed
+npm run build:screenshots
 ```
 
 ### Pre-Release Verification
@@ -538,7 +548,7 @@ npm run build:zip
 2. Click **"New Item"**
 3. Upload `extension-vX.Y.Z.zip`
 4. Fill in store listing details
-5. Select **"Private"** visibility (internal org use)
+5. Select **"Unlisted"** visibility (link-only; see `CWS_SUBMISSION.md` for why not Public yet — the Tata Motors host permission risks trademark rejection)
 6. Add trusted testers
 7. Submit for review
 
@@ -682,19 +692,24 @@ globalThis.myVar = 1;
 
 ```bash
 cd extension
+npm run build
 du -sh dist/
-find dist -name "*.js" -o -name "*.css" | xargs wc -c | sort -n
+for f in dist/assets/*; do echo "$(gzip -c "$f" | wc -c) $f"; done | sort -n
 ```
 
-Typical production build:
+`@crxjs/vite-plugin` hashes every output filename (e.g.
+`index.html-Cl-paZ5k.js`), so there's no fixed `background.js`/`popup.js` to
+name — re-run the commands above for current numbers rather than trusting a
+table. As measured on the 0.0.0.4 build (gzipped):
 
-| File | Size (gzipped) |
-|------|---------------|
-| `background.js` | ~12 KB |
-| `popup.js` | ~45 KB |
-| `popup.css` | ~8 KB |
-| Content scripts | ~3 KB each |
-| **Total** | **~75 KB** |
+| File | Size (gzipped) | What it roughly is |
+|------|---------------:|---|
+| `networkSpy.js-*.js` | ~1 KB | Content script, MAIN world |
+| `fleetedgeTokenReader.js-*.js` | ~3 KB | Content script, ISOLATED world |
+| `index-*.css` | ~4 KB | Popup styles |
+| `index.js-*.js` | ~9 KB | Service worker entry |
+| `index.html-*.js` | ~67 KB | Popup bundle (React + app code) |
+| **Total unpacked** | **~190 KB** | `du -sh dist/` |
 
 ---
 

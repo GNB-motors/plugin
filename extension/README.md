@@ -2,7 +2,7 @@
 
 A Manifest V3 Chrome extension that links your **FleetEdge** telematics sessions to the **GNB** backend so the backend can audit fuel consumption against billed fuel — automatically, server-side, for **multiple FleetEdge accounts per user**.
 
-> **Version:** see [`CHANGELOG.md`](./CHANGELOG.md) and `manifest.json`. The extension is on the `0.x` line. Older docs referenced a "v2.0.0 architecture" — that was an internal milestone, not a published release; the architecture it describes (backend-direct, content-script token capture) is what's in use today.
+> **Version:** see [`CHANGELOG.md`](./CHANGELOG.md) and `manifest.json`. The extension is on the `0.x` line. Older docs referenced a "v2.0.0 architecture" — that was an internal milestone, not a published release; the architecture it describes (backend-direct, content-script token capture) is what's in use today. The repo-root `README.md` one level up describes an even older single-account model — this file supersedes it.
 
 ---
 
@@ -121,6 +121,10 @@ sequenceDiagram
 **Idempotent re-link.** Clicking "Connect" / "Reconnect" for a fleet you've already linked **updates** the existing `UserFleetEdgeToken` row (looked up by `userId × accountId`) — it overwrites `token`, `expiresAt`, `linkedAt`, sets `status = ACTIVE`, clears the account's `FLEETEDGE_REAUTH_REQUIRED` UserError, and flips `FleetEdgeAccount.status` back to `ACTIVE` if it was `AUTH_FAILED`. No matter how many times you click, you end up with exactly one fresh row — never duplicates. That's also the entire backend job of the "Reconnect" button.
 
 **Why the token is encrypted (and why it's encryption, not a hash).** A hash is one-way — you can verify a value but never recover it. The backend has to *send* the JWT to FleetEdge on every pull, so it needs the original back: that requires reversible **AES-256-GCM** (`encrypt`/`decrypt` in `app/utils/crypto.js`). The token is a live credential — anyone who could read the DB (a leaked backup, a stolen dump) would otherwise be able to call FleetEdge *as that user* until the token expires. Storing ciphertext + holding the key separately (`FLEETEDGE_CRED_KEY` in env, never in the DB) makes the DB contents alone worthless. Each token row is encrypted independently (fresh random IV per `encrypt()`), so one leaking doesn't help with another. Key rotation is supported via `FLEETEDGE_CRED_KEY_PREVIOUS` (decrypt-only fallback).
+
+**Clearing the FleetEdge session after linking (0.0.0.4).** After a successful link, `clearFleetEdgeSessionAndCloseTabs()` (`src/background/fleetedgeLink.js`) runs `chrome.browsingData.remove({ origins: [FLEETEDGE_ORIGIN, CVP_AUTH_ORIGIN] }, { cookies: true, localStorage: true })`, then closes any open FleetEdge tabs. Why: the browser's FleetEdge SPA is a second consumer of the same single-use refresh token, and if its tab stays open its own refresh timer can rotate the token and invalidate the copy just stored server-side. This is a purely **local** delete — it never calls a FleetEdge/Keycloak logout endpoint, so the server-side session (and the token just stored) stay alive. A failure to clear never fails the link; only the tab-closing convenience is lost.
+
+**Reading the token when WebCrypto can't.** `src/content/aes192cbc.js` is a pure-JS AES-192-CBC decryptor for the SPA's encrypted `localStorage` token. Browsers' native `SubtleCrypto` does not implement AES-192 (only 128/256), so `fleetedgeTokenReader.js` falls back to this implementation specifically for that key length — the one case WebCrypto can't cover.
 
 ---
 
@@ -305,9 +309,12 @@ Base: `https://api.app.gnbedge.in/api/extension` (configurable; the dev default 
 {
   "manifest_version": 3,
   "name": "gnbedge",
-  "permissions": ["storage", "alarms", "notifications"],
+  "permissions": ["storage", "alarms", "notifications", "browsingData"],
   "host_permissions": ["https://api.app.gnbedge.in/*"],
-  "optional_host_permissions": ["https://fleetedge.home.tatamotors/*"],
+  "optional_host_permissions": [
+    "https://fleetedge.home.tatamotors/*",
+    "https://cvpauth.api.tatamotors/*"
+  ],
   "externally_connectable": {
     "matches": ["https://app.gnbedge.in/*", "https://main-frontend-wine.vercel.app/*"]
   },
@@ -329,6 +336,7 @@ Base: `https://api.app.gnbedge.in/api/extension` (configurable; the dev default 
 | No `tabs` permission | Reading/reloading the FleetEdge tab works *because* the FleetEdge host is a granted **optional** host permission, not because of a `tabs` permission. |
 | Minimal install-time scope | Only `https://api.app.gnbedge.in/*` is a required host. The FleetEdge intranet host sits in `optional_host_permissions` and is requested at runtime when you click "Connect" — so the install screen never shows it. |
 | Onboarding detection without data exposure | `externally_connectable` whitelists the gnbedge web app (prod + Vercel dev) to send a single `{ type: "PING" }` message; the background responds only with `{ ok: true, version }`. No auth or user data is exposed via this channel. |
+| `browsingData` is scoped, not broad | Used for exactly one origin-scoped call after a successful link — `chrome.browsingData.remove({ origins: [FLEETEDGE_ORIGIN, CVP_AUTH_ORIGIN] }, { cookies: true, localStorage: true })`. Browsing history, cache, and every other site are untouched; see "Clearing the FleetEdge session after linking" below. |
 | Single, disclosed purpose | The extension reads the FleetEdge session token *solely* to relay it to your own organisation's backend — never to a third party. No analytics SDKs. The content script matches one host only. See [the privacy policy](https://gnb-motors.github.io/gnbedge-pages/) and `CWS_SUBMISSION.md`. |
 
 ---
@@ -346,12 +354,15 @@ extension/
 ├── public/
 │   ├── privacy.html                    # privacy policy (host at a public HTTPS URL)
 │   └── icons/                          # 16 / 48 / 128 px
-├── scripts/                            # build-zip.cjs, check-manifest-policy.cjs, check-secrets.cjs, upload-sourcemaps.cjs
+├── scripts/                            # build-zip.cjs, zip-dir.cjs, check-manifest-policy.cjs,
+│                                        # check-secrets.cjs, upload-sourcemaps.cjs, build-screenshots.cjs
+├── .env.production                     # committed — release builds always hit prod (see below)
 └── src/
     ├── main.jsx                        # popup React entry
     ├── content/
     │   ├── networkSpy.js               # MAIN-world fetch/XHR patch — sees the bearer token
-    │   └── fleetedgeTokenReader.js     # ISOLATED-world bridge — answers READ_FLEETEDGE_TOKEN
+    │   ├── fleetedgeTokenReader.js     # ISOLATED-world bridge — answers READ_FLEETEDGE_TOKEN
+    │   └── aes192cbc.js                # pure-JS AES-192-CBC fallback (WebCrypto has no AES-192)
     ├── background/
     │   ├── index.js                    # service worker — alarms, message router, status cache
     │   ├── fleetedgeLink.js            # multi-account: connect / reconnect / disconnect / rename / status, badge, expiry notifications
@@ -380,11 +391,14 @@ npm run dev
 # production build → dist/
 npm run build
 
-# build + upload source maps + produce the upload zip
+# build + upload source maps + produce the upload zip (always targets prod — see below)
 npm run build:zip
 
+# regenerate the Chrome Web Store screenshots + promo tile from the real built popup
+npm run build:screenshots
+
 # tests
-npm test                  # vitest run (187 tests, 2 skipped)
+npm test                  # vitest run (277 tests, 2 skipped)
 npm run test:watch        # re-run on save
 npm run test:smoke        # Playwright: load dist/ into Chromium, verify popup renders
 npm run lint
@@ -394,6 +408,8 @@ npm run check:manifest    # CWS policy check on manifest + dist
 npm run check:secrets     # scan dist/ for hardcoded secrets
 npm run check:security    # both above + npm audit --audit-level=high
 ```
+
+**Release builds always target production, regardless of your local `.env`.** `vite.config.js` derives `host_permissions` from `VITE_BACKEND_BASE_URL`, so a build that read a dev-box `.env` would ship that host to the Chrome Web Store. `.env.production` (committed, no secrets — just `https://api.app.gnbedge.in/v1`) is loaded by Vite in production mode and overrides `.env`, so `npm run build` / `build:zip` are safe by default even with `.env` pointed at a dev box. `npm run dev` still reads `.env` as normal.
 
 **Load into Chrome:** `chrome://extensions/` → enable **Developer mode** → **Load unpacked** → pick `dist/` (production) or the project root (dev). Popup changes hot-reload; service-worker changes need the refresh icon on the extensions page.
 
@@ -450,4 +466,6 @@ For the deeper backend story (encryption, cron cadence, `NO_DATA`/backoff, the `
 
 ## Versioning
 
-This extension follows semantic versioning on the `0.x` line. Every release gets an entry in [`CHANGELOG.md`](./CHANGELOG.md) (`## [YYYY-MM-DD] vX.Y.Z — summary`, Keep-a-Changelog sections). `MINOR` for new capability, `PATCH` for fixes. The `manifest.json` version is the **source of truth** for CWS submissions. `package.json` may drift behind (e.g. `0.0.0.1` vs manifest `0.0.0.2`) — do not bump `manifest.json` outside a CWS submission cycle. Current shipped version: `0.0.0.3`. No `2.x` release was ever published — older "v2.0.0" references in the codebase describe an architecture milestone, not a shipped version.
+This extension follows semantic versioning on the `0.x` line. Every release gets an entry in [`CHANGELOG.md`](./CHANGELOG.md) (`## [YYYY-MM-DD] vX.Y.Z — summary`, Keep-a-Changelog sections). `MINOR` for new capability, `PATCH` for fixes. The `manifest.json` version is the **source of truth** for CWS submissions. `package.json` should track `manifest.json` (they had drifted — `0.0.0.2` vs `0.0.0.4` — until both were synced in the 0.0.0.4 release); do not bump `manifest.json` outside a CWS submission cycle. Current shipped version: `0.0.0.4`. No `2.x` release was ever published — older "v2.0.0" references in the codebase describe an architecture milestone, not a shipped version.
+
+**The manifest-version check needs a tag, not just history.** `check-manifest-policy.cjs` compares against `git describe --tags --abbrev=0` first, falling back to `HEAD~1:extension/manifest.json`. Tag every version actually submitted to the Chrome Web Store (`git tag -a v0.0.0.3 <last commit at that version> -m "..."`) — without it, once two consecutive commits share the same manifest version (e.g. a docs-only follow-up), the `HEAD~1` fallback compares a version against itself and the check fails with no real problem to fix.

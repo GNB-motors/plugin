@@ -46,44 +46,45 @@ If **either linting or tests fail**, the push is blocked. You must fix the issue
 
 ```bash
 # Force push without running hooks (use sparingly!)
-git push --no-verify origin Devayan
+git push --no-verify origin <your-branch>
 ```
 
 ### Tests Match Reality
 
-The test suite tests the **actual working implementation** (tab injection via `chrome.scripting.executeScript`). All **187 tests pass** (2 skipped) across **9 files**:
+> This table previously described a since-removed architecture — tab injection via
+> `chrome.scripting.executeScript`, plus `fleetedgeApi.test.js` and `taskPoller.test.js`,
+> neither of which exists anymore. The extension does not hold the `scripting` permission
+> (see `AGENTS.md`); FleetEdge tokens are read by **declared content scripts**
+> (`networkSpy.js` in the MAIN world, `fleetedgeTokenReader.js` in the ISOLATED world — see
+> `README.md`'s "Data flow 1"), and task processing is a backend cron, not an extension
+> poll loop. The table below is the real current file list.
+
+All **277 tests pass** (2 skipped) across **12 files**:
 
 | File | Tests | Coverage |
 |------|------:|----------|
-| `utils.test.js` | 16 | Pure functions: retries, time conversion, JWT parsing |
-| `backendApi.test.js` | 19 | Backend API calls, error codes, auth state management |
-| `fleetedgeApi.test.js` | 20 | Tab injection, endpoint validation, error handling |
-| `taskPoller.test.js` | 12 | Poll cycles, VIN resolution, IST ↔ UTC conversion |
-| `integration.test.js` | 13 | End-to-end flows: login → tasks → submit, auth lifecycle |
-| `telemetry.test.js` | 45 | LEMU telemetry: 7-layer logger, batching, error tracking |
-| `logger.test.js` | 6 | Buffered logging, module names, limits |
-| **`edge-cases-utils.test.js`** | **46** | **Error boundaries for all utility functions** |
-| **`edge-cases-integration.test.js`** | **9** | **Module-level edge cases: timeout, 401 clear, VIN fallback** |
+| `background/utils.test.js` | 25 | Pure functions: JWT decode, retries, IST↔UTC, registration normalization |
+| `background/logger.test.js` | 6 | Buffered logging, module names, limits |
+| `background/backendApi.test.js` | 22 (+1 skipped) | Backend API calls, auth state, timeout handling |
+| `background/integration.test.js` | 9 (+1 skipped) | End-to-end flows: login → status → FleetEdge link, auth lifecycle |
+| `background/telemetry.test.js` | 56 | LEMU telemetry: 7-layer logger, batching, error tracking |
+| `background/edge-cases-utils.test.js` | 46 | Error boundaries for all utility functions |
+| `background/edge-cases-integration.test.js` | 14 | Module-level edge cases: timeout, 401 clear, link edge cases |
+| `background/edge-cases-v2.test.js` | 50 | Additional edge-case coverage added post-multi-account |
+| `content/networkSpy.test.js` | 19 | MAIN-world fetch/XHR monkey-patch, token capture |
+| `content/fleetedgeTokenReader.test.js` | 16 | ISOLATED-world bridge, `READ_FLEETEDGE_TOKEN` reply |
+| `content/aes192cbc.test.js` | 5 | Pure-JS AES-192-CBC fallback (WebCrypto has no AES-192) |
+| `popup/lifecycle.test.js` | 9 | Popup mount/unmount, polling lifecycle |
+
+The two skips are the same pre-existing "custom `backendUrl` from storage" cases in
+`backendApi.test.js` and `integration.test.js` — kept skipped intentionally, not a new gap.
 
 ---
 
 ## Test Structure
 
-All test files live inside the module they test, under a `__tests__` directory:
-
-```
-src/background/
-├── __tests__/
-│   ├── utils.test.js                  ← pure-function tests (no Chrome API)
-│   ├── logger.test.js                 ← buffered logger, storage interactions
-│   ├── fleetedgeApi.test.js           ← fetch mocking, API error handling
-│   ├── backendApi.test.js             ← backend fetch helpers, fire-and-forget
-│   ├── taskPoller.test.js             ← poll-cycle integration, VIN resolution
-│   ├── integration.test.js            ← end-to-end multi-module flows
-│   ├── telemetry.test.js              ← LEMU telemetry collector tests
-│   ├── edge-cases-utils.test.js       ← error boundaries (pure functions)
-│   └── edge-cases-integration.test.js ← error boundaries (mocked modules)
-```
+Test files live inside the module they test, under a `__tests__` directory —
+`src/background/__tests__/`, `src/content/__tests__/`, and `src/popup/__tests__/`.
 
 Tests are discovered by the glob pattern in `vite.config.js`:
 
@@ -209,7 +210,7 @@ include: ['src/background/*.js']
 exclude: ['src/background/__tests__/**']
 ```
 
-Aim for **≥ 80 % statement coverage** on `utils.js`, `fleetedgeApi.js`, and `backendApi.js`. The `taskPoller.js` poll-cycle path is harder to unit-test fully because it orchestrates multiple services — integration/E2E tests are more appropriate for its end-to-end behaviour.
+Aim for **≥ 80 % statement coverage** on `utils.js` and `backendApi.js`. The `fleetedgeLink.js` multi-account connect/reconnect/disconnect path is harder to unit-test fully because it orchestrates content-script capture, `chrome.permissions`, and the backend link call — integration/E2E tests are more appropriate for its end-to-end behaviour.
 
 ---
 
@@ -268,8 +269,7 @@ This pattern is the correct way to test modules with different mock configuratio
 
 | Scope | Reason |
 |-------|--------|
-| `tokenCapture.js` | Relies on `chrome.webRequest` — best tested with Playwright or a manual flow |
-| `index.js` (message router) | Thin orchestration layer; covered implicitly by taskPoller tests |
+| `index.js` (message router) | Thin orchestration layer; covered implicitly by the integration + edge-case suites |
 | React popup components | UI components require a DOM environment (jsdom) — add with `@testing-library/react` if needed |
 | Extension load / manifest | Chrome's own extension validation covers this at `chrome://extensions` |
 

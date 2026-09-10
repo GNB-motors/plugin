@@ -16,8 +16,10 @@ plugin/
 │   ├── scripts/            # Build helpers + CWS policy & security checks
 │   │   ├── check-manifest-policy.cjs
 │   │   ├── check-secrets.cjs
-│   │   ├── build-zip.cjs
-│   │   └── upload-sourcemaps.cjs
+│   │   ├── build-zip.cjs         # Node zip writer (zip-dir.cjs) — no PowerShell/zip dependency
+│   │   ├── zip-dir.cjs
+│   │   ├── upload-sourcemaps.cjs
+│   │   └── build-screenshots.cjs # renders dist/ headlessly for the CWS listing assets
 │   ├── e2e/                # Playwright smoke tests
 │   │   └── smoke.spec.js
 │   ├── playwright.config.js
@@ -57,7 +59,7 @@ All from `extension/`:
 ```bash
 npm install          # First time, or after dependency changes
 npm run lint         # ESLint over src/
-npm test             # Vitest, 187 tests, ~20 sec (1 test deliberately waits 3 s for setTimeout)
+npm test             # Vitest, 277 tests + 2 skipped, ~20 sec (1 test deliberately waits 3 s for setTimeout)
 npm run build        # Vite production build → dist/
 npm run build:zip    # Build + zip for CWS submission
 ```
@@ -86,7 +88,7 @@ The extension is published at `chrome-extension://<id>` as **gnbedge**. Currentl
 1. **No `webRequest`, `scripting`, or `tabs` permissions.** The whole architecture was redesigned in v2.0.0 to avoid these (see README "Migration from v1.x"). Adding them back means re-justifying to CWS and possibly being rejected.
 2. **`https://fleetedge.home.tatamotors/*` stays in `optional_host_permissions`, not `host_permissions`.** Granted at runtime, not install — this is what keeps the install screen clean.
 3. **No remote code execution.** All JS is bundled at build time. No CDN imports, no `eval`, no remote-loaded scripts.
-4. **`manifest.json` version must monotonically increase.** CWS rejects re-uploads of the same version. Bump before every `build:zip`.
+4. **`manifest.json` version must monotonically increase.** CWS rejects re-uploads of the same version. Bump before every `build:zip`. `check-manifest-policy.cjs` enforces this by comparing against `git describe --tags --abbrev=0` first, falling back to `HEAD~1:extension/manifest.json` — so **tag every version actually submitted to CWS** (`git tag -a v0.0.0.3 <commit> -m "..."`). Without a tag, once two consecutive commits share the same manifest version (e.g. a docs-only follow-up after the release commit), the `HEAD~1` fallback compares that version against itself and the check fails with nothing real to fix.
 
 ## Test conventions
 
@@ -97,7 +99,7 @@ The extension is published at `chrome-extension://<id>` as **gnbedge**. Currentl
 
 ## Backend integration
 
-The extension is a thin client; the backend (`GNB-motors/main-backend`, branch `Devayan`) does all FleetEdge API work.
+The extension is a thin client; the backend (`GNB-motors/main-backend`) does all FleetEdge API work. **Don't hardcode a branch name here** — it has moved more than once since this was written (observed on `staging` and later `map-and-sink` in active development in the same window). Check the backend repo's own current branch before assuming which one is canonical.
 
 Endpoints the extension calls (all under `/api/extension/`):
 
@@ -123,6 +125,7 @@ If the backend is changed in a way that breaks these contracts (e.g. renaming a 
 - **`VITE_API_BASE_URL` in the frontend `.env` defaults to localhost.** The production URL is `https://api.app.gnbedge.in/v1/` — switching back to localhost for dev is intentional, do not commit that change to a release branch.
 - **Vite dev server doesn't run the extension.** `npm run dev` is only useful for popup UI iteration. The actual extension always loads from a Chrome `Load unpacked` pointed at `dist/` (after `npm run build`).
 - **`crxjs` rebuilds the service worker on file change** when running `dev`, but Chrome caches the old worker — click the refresh icon on `chrome://extensions/` after every background change.
+- **A release build always targets prod, even if `.env` points at a dev box.** `vite.config.js` derives `host_permissions` from `VITE_BACKEND_BASE_URL`, so a `build`/`build:zip` that read a dev `.env` would ship the dev host in the manifest to the Chrome Web Store. `.env.production` (committed, `https://api.app.gnbedge.in/v1`, no secrets) is loaded by Vite in production mode and wins over `.env`. `npm run dev` still reads `.env` as before. Do not delete `.env.production` or make it env-specific.
 
 ## Commit / PR conventions
 
@@ -138,7 +141,7 @@ If the backend is changed in a way that breaks these contracts (e.g. renaming a 
 - Add a new `chrome.*` permission to `manifest.json`.
 - Change the `name` field — it's "gnbedge" for CWS reasons (the original name "FleetEdge Fuel Monitor" triggered trademark concerns).
 - Push to `main`.
-- Remove or rename files in `src/background/__tests__/` — the count `187 tests` is referenced in README and CHANGELOG.
+- Remove or rename files in `src/background/__tests__/`, `src/content/__tests__/`, or `src/popup/__tests__/` — the count `277 tests` is referenced in README, TESTING.md, CONTRIBUTING.md, and the PR template.
 - Run `docker compose down -v` — wipes the local Mongo and the user has live data in it.
 
 ## Where to look when something is broken
