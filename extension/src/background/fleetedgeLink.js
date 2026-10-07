@@ -425,8 +425,15 @@ async function _connectFleetEdgeInner({ expectedFleetId = null, expectedAccountI
     // Only clear the browser session if we captured a refresh token. No refresh
     // token means nothing to protect from SPA rotation; don't log the user out.
     let sessionCleared = false;
-    const noRefreshToken = !captured.refreshToken;
-    if (captured.refreshToken) {
+    // The backend may refuse a captured refresh token (it belongs to a DIFFERENT
+    // FleetEdge user than the account being linked — one browser session used to
+    // link several accounts — or it is already expired). Such a link cannot
+    // renew either, so it is treated exactly like "none captured": warn, and do
+    // not sign the browser out (2026-10-07: BD died 48 h after such a link).
+    const refreshRejected = result && result.refreshRejected ? result.refreshRejected : null;
+    const noRefreshToken =
+      !captured.refreshToken || (result && result.refreshStored === false);
+    if (!noRefreshToken) {
       const clearResult = await clearFleetEdgeSessionAndCloseTabs();
       sessionCleared = clearResult.sessionCleared;
     } else {
@@ -454,6 +461,7 @@ async function _connectFleetEdgeInner({ expectedFleetId = null, expectedAccountI
       accounts: status.accounts || [],
       sessionCleared,
       noRefreshToken,
+      refreshRejected,
     };
   } catch (err) {
     logger.error('Failed to link token:', err.message);
