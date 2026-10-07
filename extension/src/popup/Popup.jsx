@@ -786,7 +786,12 @@ export default function Popup() {
             if (res.success) {
               setTabPicker(null);
               setTabPickerSelected(null);
-              if (res.noRefreshToken) {
+              if (res.noRefreshToken && res.refreshRejected === 'DIFFERENT_USER') {
+                showToast(
+                  'Connected, but this browser is signed in to FleetEdge as a DIFFERENT user, so the account cannot renew itself and will stop in 48 h. Sign in to FleetEdge as this account’s own user, then connect again.',
+                  'err'
+                );
+              } else if (res.noRefreshToken) {
                 showToast(
                   'Connected, but NO refresh token was captured — this account will die when its access token lapses. Reload FleetEdge, wait for the map to load, then connect again.',
                   'err'
