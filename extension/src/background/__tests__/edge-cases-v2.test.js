@@ -1313,14 +1313,16 @@ describe('index.js — v2 improvements (handleMessage logic)', () => {
     expect(chrome.action.setBadgeText).toHaveBeenCalledWith({ text: '' });
   });
 
-  it('CLEAR_ALL invalidates status cache', async () => {
+  it('CLEAR_ALL clears this browser only and never revokes the server-side link', async () => {
+    // prod BD 2026-10-09: clearing the extension on a shared Chrome revoked the
+    // org's FleetEdge link on the backend and its truck data stopped
     const { sendMessage, spies, STORE } = await setupIndex({
       store: { authToken: 'jwt', authUser: { name: 'T' } },
     });
 
     await sendMessage({ type: 'CLEAR_ALL' });
 
-    expect(spies.disconnectFleetEdge).toHaveBeenCalled();
+    expect(spies.disconnectFleetEdge).not.toHaveBeenCalled();
     expect(STORE.authToken).toBeUndefined();
   });
 
