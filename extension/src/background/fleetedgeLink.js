@@ -556,10 +556,12 @@ export async function reconnectFleetEdgeAccount(accountId) {
 export async function disconnectFleetEdgeAccount(accountId) {
   return withLinkLock(async () => {
     try {
-      await backendFetch('/fleetedge/unlink', {
-        method: 'POST',
-        body: accountId ? JSON.stringify({ accountId }) : undefined,
-      });
+      // The account goes in the path: the backend never read a body accountId, so
+      // "disconnect one" revoked every link (prod BD 2026-10-09). All = explicit.
+      await backendFetch(
+        accountId ? `/fleetedge/unlink/${encodeURIComponent(accountId)}` : '/fleetedge/unlink',
+        { method: 'POST', body: accountId ? undefined : JSON.stringify({ all: true }) },
+      );
     } catch (err) {
       logger.warn('Unlink API call failed:', err.message);
       feTel.warn('Unlink API call failed', { error: err.message });
@@ -583,7 +585,8 @@ export async function disconnectFleetEdgeAccount(accountId) {
 }
 
 /**
- * Disconnect all accounts (used by clearData / CLEAR_ALL).
+ * Disconnect every account on the backend (the explicit "disconnect all").
+ * CLEAR_ALL does not call it: clearing this browser must not cut the org's feed.
  */
 export async function disconnectFleetEdge() {
   return disconnectFleetEdgeAccount(null);

@@ -357,12 +357,10 @@ async function handleMessage(message) {
       // G-3: Remove the full explicit set of storage keys so no residue is
       // left when a shared Chrome profile switches users. Using an explicit
       // list is intentional — safer than a runtime enumerate-and-clear approach.
-      // Disconnect FleetEdge on backend (best-effort — proceed even if it fails).
-      try {
-        await disconnectFleetEdge();
-      } catch {
-        /* best-effort disconnect — proceed with clearing data */
-      }
+      // Local only. The org's FleetEdge link on the backend is shared by every
+      // user and feeds the whole fleet; clearing one browser (a shared Chrome
+      // switching users) used to revoke it and stop the data (prod BD
+      // 2026-10-09). Disconnecting stays an explicit popup action.
 
       invalidateStatusCache();
       resetTriggerCooldownState();
