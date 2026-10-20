@@ -287,6 +287,7 @@
 .acc-note {
   margin-top: 4px;
   font-size: 12px;
+  text-wrap: pretty;
 }
 .acc-note--warn {
   color: var(--warn);
@@ -855,6 +856,266 @@
   }
 }
 
+/* ─── motion animations ───────────────────────────────────────────────── */
+
+/* Open: header fade in */
+.gnb-header {
+  animation: fade-in 180ms var(--ease) both;
+}
+
+@keyframes fade-in {
+  from { opacity: 0; }
+  to { opacity: 1; }
+}
+
+/* Open: cards in view-wrapper fade in and rise */
+.view-wrapper > .notice,
+.view-wrapper > .prov,
+.view-wrapper > .stats {
+  animation: rise-in 260ms var(--ease) both;
+  animation-delay: calc(var(--i, 0) * 50ms);
+}
+
+@keyframes rise-in {
+  from {
+    opacity: 0;
+    transform: translateY(8px);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0);
+  }
+}
+
+/* Live dot: pill--ok soft expanding ring (box-shadow pulse) */
+.pill--ok::before {
+  animation: ring-expand 2.4s ease-out infinite;
+}
+
+@keyframes ring-expand {
+  0% {
+    box-shadow: 0 0 0 0 rgba(31, 122, 77, 0.45);
+  }
+  100% {
+    box-shadow: 0 0 0 5px rgba(31, 122, 77, 0);
+  }
+}
+
+/* Live dot: pill--crit opacity breathe */
+.pill--crit::before {
+  animation: breathe 1.6s ease-in-out infinite;
+}
+
+@keyframes breathe {
+  0%, 100% { opacity: 1; }
+  50% { opacity: 0.45; }
+}
+
+/* Syncing: progress bar on busy cards */
+.prov--busy {
+  position: relative;
+  overflow: hidden;
+}
+
+.prov--busy::after {
+  content: '';
+  position: absolute;
+  top: 0;
+  left: 0;
+  right: 0;
+  height: 2px;
+  background: linear-gradient(
+    90deg,
+    transparent 0%,
+    var(--accent) 30%,
+    var(--accent) 70%,
+    transparent 100%
+  );
+  background-size: 200% 100%;
+  animation: slide-bar 1.1s linear infinite;
+}
+
+@keyframes slide-bar {
+  0% { background-position: 200% 0; }
+  100% { background-position: -200% 0; }
+}
+
+/* Rows: mount fade in staggered */
+.acc {
+  animation: row-in 200ms var(--ease) both;
+  animation-delay: calc(var(--i, 0) * 30ms);
+  transition: background 150ms var(--ease);
+}
+
+@keyframes row-in {
+  from {
+    opacity: 0;
+  }
+  to {
+    opacity: 1;
+  }
+}
+
+@media (hover: hover) {
+  .acc:hover {
+    background: var(--sunk);
+  }
+}
+
+/* Menu: open animation */
+.menu {
+  transform: scale(0.96);
+  transform-origin: top right;
+  animation: menu-in 140ms var(--ease) both;
+}
+
+@keyframes menu-in {
+  from {
+    opacity: 0;
+    transform: scale(0.96);
+  }
+  to {
+    opacity: 1;
+    transform: scale(1);
+  }
+}
+
+/* Buttons: active scale */
+.btn {
+  transition: transform 80ms var(--ease);
+}
+
+.btn:active:not(:disabled) {
+  transform: scale(0.97);
+}
+
+/* Toast: enter animation (refined) */
+.toast {
+  animation: toast-in 200ms var(--ease) both;
+}
+
+@keyframes toast-in {
+  from {
+    opacity: 0;
+    transform: translateY(10px);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0);
+  }
+}
+
+/* Modal: backdrop fade in */
+.modal-backdrop {
+  animation: fade-in 160ms var(--ease) forwards;
+}
+
+/* Modal: scale and fade in */
+.modal {
+  transform: scale(0.96);
+  animation: modal-in 180ms var(--ease) both;
+}
+
+@keyframes modal-in {
+  from {
+    opacity: 0;
+    transform: scale(0.96);
+  }
+  to {
+    opacity: 1;
+    transform: scale(1);
+  }
+}
+
+/* Banner/Notice: slide down and fade in */
+.notice {
+  animation: notice-in 220ms var(--ease) forwards;
+}
+
+@keyframes notice-in {
+  from {
+    opacity: 0;
+    transform: translateY(-6px);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0);
+  }
+}
+
+/* View transitions: slide in from right (logs) or left (home) */
+.view-wrapper {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+  flex: 1;
+  min-height: 0;
+}
+
+.view-wrapper--enter-right {
+  animation: view-in-from-right 200ms var(--ease) both;
+}
+
+.view-wrapper--enter-left {
+  animation: view-in-from-left 200ms var(--ease) both;
+}
+
+@keyframes view-in-from-right {
+  from {
+    opacity: 0;
+    transform: translateX(12px);
+  }
+  to {
+    opacity: 1;
+    transform: translateX(0);
+  }
+}
+
+@keyframes view-in-from-left {
+  from {
+    opacity: 0;
+    transform: translateX(-12px);
+  }
+  to {
+    opacity: 1;
+    transform: translateX(0);
+  }
+}
+
+/* Sign-in: login-head fade and rise */
+.login-head {
+  animation: fade-rise 300ms var(--ease) both;
+}
+
+@keyframes fade-rise {
+  from {
+    opacity: 0;
+    transform: translateY(6px);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0);
+  }
+}
+
+/* Sign-in: login-error shake */
+.login-error {
+  animation: shake 320ms var(--ease);
+}
+
+@keyframes shake {
+  0%, 100% { transform: translateX(0); }
+  20% { transform: translateX(-6px); }
+  40% { transform: translateX(6px); }
+  60% { transform: translateX(-4px); }
+  80% { transform: translateX(4px); }
+}
+
+.notice-actions {
+  margin-top: 8px;
+}
+
+/* Reduced motion: disable all animations */
 @media (prefers-reduced-motion: reduce) {
   .gnb-popup *,
   .gnb-popup *::before,
@@ -862,8 +1123,10 @@
     animation: none !important;
     transition: none !important;
   }
-}
 
-.notice-actions {
-  margin-top: 8px;
+  /* The pill dot IS ::before, so keep it (still, via animation: none above); only the
+     sliding busy bar is hidden. */
+  .prov--busy::after {
+    display: none;
+  }
 }

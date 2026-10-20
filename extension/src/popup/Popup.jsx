@@ -1,6 +1,7 @@
 import { useState, useEffect, useRef, useCallback, useMemo, useId } from 'react';
 import './Popup.css';
 import { resetTransientState } from './lifecycle.js';
+import { useCountUp } from './useCountUp.js';
 import IalertSection from './IalertSection.jsx';
 import {
   IconBack,
@@ -43,7 +44,7 @@ const plural = (n, one, many) => `${count(n)} ${n === 1 ? one : many}`;
 
 // ── FleetEdge ─────────────────────────────────────────────────────────────────
 
-function FleetEdgeAccountRow({ account, onAction }) {
+function FleetEdgeAccountRow({ account, onAction, style }) {
   const now = useNow();
   const status = deriveStatus(account, now);
   const [renaming, setRenaming] = useState(false);
@@ -71,7 +72,7 @@ function FleetEdgeAccountRow({ account, onAction }) {
   const mins = minutesUntil(account.expiresAt, now);
 
   return (
-    <div className="acc">
+    <div className="acc" style={style}>
       <div className="acc-main">
         <div className="acc-name" title={account.fleetId || undefined}>
           {renaming ? (
@@ -137,7 +138,7 @@ function FleetEdgeAccountRow({ account, onAction }) {
   );
 }
 
-function FleetEdgeCard({ accounts, pull, onAction }) {
+function FleetEdgeCard({ accounts, pull, onAction, style }) {
   const now = useNow();
   const hasActive = accounts.some((a) => deriveStatus(a, now) === 'linked');
   const vehicles = accounts.reduce((n, a) => n + (a.vehicleCount ?? 0), 0);
@@ -156,7 +157,12 @@ function FleetEdgeCard({ accounts, pull, onAction }) {
         .join(' · ') || 'Waiting for the first sync';
 
   return (
-    <section className="prov" aria-labelledby="prov-fe">
+    <section
+      className={`prov${pulling ? ' prov--busy' : ''}`}
+      aria-labelledby="prov-fe"
+      aria-busy={pulling}
+      style={style}
+    >
       <header className="prov-head">
         <span className="prov-logo prov-logo--tata" aria-hidden="true">
           TATA
@@ -195,8 +201,13 @@ function FleetEdgeCard({ accounts, pull, onAction }) {
       ) : (
         <>
           <div className="prov-rows">
-            {accounts.map((a) => (
-              <FleetEdgeAccountRow key={a.accountId} account={a} onAction={onAction} />
+            {accounts.map((a, i) => (
+              <FleetEdgeAccountRow
+                key={a.accountId}
+                account={a}
+                onAction={onAction}
+                style={{ '--i': i }}
+              />
             ))}
           </div>
           <footer className="prov-foot">
@@ -219,15 +230,21 @@ function FleetEdgeCard({ accounts, pull, onAction }) {
 
 // ── audit tasks ───────────────────────────────────────────────────────────────
 
-function TaskStats({ metrics }) {
+function TaskStats({ metrics, style }) {
   const m = metrics || {};
   const waiting = (m.pending || 0) + (m.inProgress || 0);
   const done = m.completed || 0;
   const flagged = m.flagged || 0;
   const noData = m.noData || 0;
   const caughtUp = waiting === 0 && done > 0;
+
+  // Animated count-up values
+  const waitingVal = useCountUp(waiting);
+  const doneVal = useCountUp(done);
+  const flaggedVal = useCountUp(flagged);
+
   return (
-    <section className="stats" aria-labelledby="stats-title">
+    <section className="stats" aria-labelledby="stats-title" style={style}>
       <div className="stats-head">
         <span className="stats-title" id="stats-title">
           Audit tasks
@@ -238,15 +255,15 @@ function TaskStats({ metrics }) {
       </div>
       <div className="stats-grid">
         <div className={`stat${waiting ? ' stat--warn' : ''}`}>
-          <div className="stat-value">{count(waiting)}</div>
+          <div className="stat-value">{count(waitingVal)}</div>
           <div className="stat-label">Waiting</div>
         </div>
         <div className="stat">
-          <div className="stat-value">{count(done)}</div>
+          <div className="stat-value">{count(doneVal)}</div>
           <div className="stat-label">Done</div>
         </div>
         <div className={`stat${flagged ? ' stat--crit' : ''}`}>
-          <div className="stat-value">{count(flagged)}</div>
+          <div className="stat-value">{count(flaggedVal)}</div>
           <div className="stat-label">Flagged</div>
         </div>
       </div>
@@ -397,11 +414,15 @@ function Toast({ toast }) {
   );
 }
 
-function ExpiredBanner({ account, onAction, onDismiss }) {
+function ExpiredBanner({ account, onAction, onDismiss, style }) {
   const now = useNow();
   const expiring = deriveStatus(account, now) === 'expiring';
   return (
-    <div className={`notice ${expiring ? 'notice--warn' : 'notice--crit'}`} role="alert">
+    <div
+      className={`notice ${expiring ? 'notice--warn' : 'notice--crit'}`}
+      role="alert"
+      style={style}
+    >
       <div className="notice-text">
         <strong>{account.friendlyName}</strong>{' '}
         {expiring ? 'stops syncing soon.' : 'has stopped syncing.'} Reconnect to keep its data
@@ -518,6 +539,13 @@ export default function Popup() {
   useEffect(() => {
     viewRef.current = view;
   }, [view]);
+  // Home slides in only when coming back from the activity log, not on every open.
+  const [prevView, setPrevView] = useState(view);
+  const [backFromLogs, setBackFromLogs] = useState(false);
+  if (view !== prevView) {
+    setPrevView(view);
+    setBackFromLogs(prevView === 'logs' && view === 'home');
+  }
 
   const showToast = useCallback((message, kind = '') => {
     clearTimeout(toastTimer.current);
@@ -797,7 +825,9 @@ export default function Popup() {
   if (view === 'logs') {
     return (
       <div className="gnb-popup">
-        <LogsView logs={logs} onAction={onAction} />
+        <div className="view-wrapper view-wrapper--enter-right">
+          <LogsView logs={logs} onAction={onAction} />
+        </div>
         <Toast toast={toast} />
         {confirming && (
           <ConfirmModal
@@ -855,19 +885,33 @@ export default function Popup() {
       </header>
 
       <main className="gnb-body">
-        {expiredAcc && (
-          <ExpiredBanner
-            account={expiredAcc}
+        <div className={`view-wrapper${backFromLogs ? ' view-wrapper--enter-left' : ''}`}>
+          {expiredAcc && (
+            <ExpiredBanner
+              account={expiredAcc}
+              onAction={onAction}
+              onDismiss={() => onAction('dismissBanner', { accountId: expiredAcc.accountId })}
+              style={{ '--i': 0 }}
+            />
+          )}
+
+          <FleetEdgeCard
+            accounts={accounts}
+            pull={fe.pull || {}}
             onAction={onAction}
-            onDismiss={() => onAction('dismissBanner', { accountId: expiredAcc.accountId })}
+            style={{ '--i': expiredAcc ? 1 : 0 }}
           />
-        )}
 
-        <FleetEdgeCard accounts={accounts} pull={fe.pull || {}} onAction={onAction} />
+          <IalertSection
+            showToast={showToast}
+            confirm={setConfirming}
+            style={{ '--i': expiredAcc ? 2 : 1 }}
+          />
 
-        <IalertSection showToast={showToast} confirm={setConfirming} />
-
-        {accounts.length > 0 && <TaskStats metrics={appState.metrics} />}
+          {accounts.length > 0 && (
+            <TaskStats metrics={appState.metrics} style={{ '--i': expiredAcc ? 3 : 2 }} />
+          )}
+        </div>
       </main>
 
       <footer className="gnb-footer">
