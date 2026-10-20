@@ -11,14 +11,14 @@ import { ago } from './time.js';
 const count = (n) => Number(n || 0).toLocaleString('en-IN');
 const plural = (n, one, many) => `${count(n)} ${n === 1 ? one : many}`;
 
-function IalertAccountRow({ account, onUnlink }) {
+function IalertAccountRow({ account, onUnlink, style }) {
   const badge = ialertBadge(account);
   const name = ialertAccountName(account);
   const data = ago(account.lastDataAt);
   const note = ialertPlanNote(account.plan);
   const syncFailed = Boolean(account.lastErrorMessage);
   return (
-    <div className="acc">
+    <div className="acc" style={style}>
       <div className="acc-main">
         <div className="acc-name">{name}</div>
         <div className="acc-meta">
@@ -54,11 +54,14 @@ function IalertAccountRow({ account, onUnlink }) {
  *           confirm: (opts: { title: string, body: string, confirmLabel: string,
  *                             danger: boolean, run: () => Promise<void> }) => void }} props
  */
-export default function IalertSection({ showToast, confirm }) {
+export default function IalertSection({ showToast, confirm, style }) {
   const [loading, setLoading] = useState(true);
   const [accounts, setAccounts] = useState([]);
   const [error, setError] = useState(null);
   const [connecting, setConnecting] = useState(false);
+
+  // Add busy class when loading and accounts exist (syncing)
+  const isBusy = loading && accounts.length > 0;
 
   const refreshStatus = useCallback(async () => {
     setLoading(true);
@@ -169,11 +172,12 @@ export default function IalertSection({ showToast, confirm }) {
     body = (
       <>
         <div className="prov-rows">
-          {accounts.map((account) => (
+          {accounts.map((account, i) => (
             <IalertAccountRow
               key={account.tokenDocId || account.accountId}
               account={account}
               onUnlink={handleUnlink}
+              style={{ '--i': i }}
             />
           ))}
         </div>
@@ -193,7 +197,12 @@ export default function IalertSection({ showToast, confirm }) {
   }
 
   return (
-    <section className="prov" aria-labelledby="prov-ia" aria-busy={loading}>
+    <section
+      className={`prov${isBusy ? ' prov--busy' : ''}`}
+      aria-labelledby="prov-ia"
+      aria-busy={loading}
+      style={style}
+    >
       <header className="prov-head">
         <span className="prov-logo prov-logo--al" aria-hidden="true">
           AL
