@@ -140,12 +140,13 @@ describe('LEMU telemetry', () => {
   // ── LAYERS & SEVERITY enums ──
 
   describe('enums', () => {
-    it('exposes all 7 layers', () => {
+    it('exposes all 8 layers', () => {
       expect(Object.keys(LAYERS)).toEqual([
         'UI',
         'MESSAGE',
         'BACKEND',
         'FLEETEDGE',
+        'IALERT',
         'STORAGE',
         'TOKEN',
         'TASK',

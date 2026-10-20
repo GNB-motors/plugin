@@ -138,6 +138,8 @@ export async function backendFetch(path, options = {}) {
       body.message || `Backend ${options.method || 'GET'} ${path} failed: ${response.status}`
     );
     err.status = response.status;
+    // The backend's machine-readable reason (e.g. IALERT_TOKEN_TOO_OLD).
+    if (typeof body.code === 'string') err.code = body.code;
     // Parse Retry-After (seconds-as-integer per RFC 7231; HTTP-date form also
     // supported) so withRetry can honor 429 backpressure once before failing.
     if (response.status === 429) {

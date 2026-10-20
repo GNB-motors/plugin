@@ -1,6 +1,7 @@
 import { useState, useEffect, useRef, useCallback, useMemo, useId } from 'react';
 import './Popup.css';
 import { resetTransientState } from './lifecycle.js';
+import IalertSection from './IalertSection.jsx';
 
 const AUTO_REFRESH_MS = 30_000;
 
@@ -1098,6 +1099,9 @@ export default function Popup() {
             </div>
           </>
         )}
+
+        {/* iALERT section - below FleetEdge accounts */}
+        <IalertSection showToast={showToast} confirm={setConfirming} />
 
         <div className="gnb-section-label" style={{ marginTop: 4 }}>
           Tasks
