@@ -2,196 +2,30 @@ import { useState, useEffect, useRef, useCallback, useMemo, useId } from 'react'
 import './Popup.css';
 import { resetTransientState } from './lifecycle.js';
 import IalertSection from './IalertSection.jsx';
+import {
+  IconBack,
+  IconClose,
+  IconList,
+  IconLogout,
+  IconPlus,
+  IconRefresh,
+  IconSync,
+  Pill,
+  RowMenu,
+} from './ui.jsx';
+import { ago, until, minutesUntil } from './time.js';
 
 const AUTO_REFRESH_MS = 30_000;
-
-// ── icons ─────────────────────────────────────────────────────────────────────
-const Icon = {
-  Logout: (p) => (
-    <svg
-      width="14"
-      height="14"
-      viewBox="0 0 24 24"
-      fill="none"
-      stroke="currentColor"
-      strokeWidth="2"
-      strokeLinecap="round"
-      strokeLinejoin="round"
-      {...p}
-    >
-      <path d="M9 21H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h4" />
-      <polyline points="16 17 21 12 16 7" />
-      <line x1="21" y1="12" x2="9" y2="12" />
-    </svg>
-  ),
-  Plus: (p) => (
-    <svg
-      width="14"
-      height="14"
-      viewBox="0 0 24 24"
-      fill="none"
-      stroke="currentColor"
-      strokeWidth="2"
-      strokeLinecap="round"
-      strokeLinejoin="round"
-      {...p}
-    >
-      <line x1="12" y1="5" x2="12" y2="19" />
-      <line x1="5" y1="12" x2="19" y2="12" />
-    </svg>
-  ),
-  Refresh: (p) => (
-    <svg
-      width="14"
-      height="14"
-      viewBox="0 0 24 24"
-      fill="none"
-      stroke="currentColor"
-      strokeWidth="2"
-      strokeLinecap="round"
-      strokeLinejoin="round"
-      {...p}
-    >
-      <polyline points="23 4 23 10 17 10" />
-      <path d="M20.49 15a9 9 0 1 1-2.12-9.36L23 10" />
-    </svg>
-  ),
-  Reconnect: (p) => (
-    <svg
-      width="12"
-      height="12"
-      viewBox="0 0 24 24"
-      fill="none"
-      stroke="currentColor"
-      strokeWidth="2.4"
-      strokeLinecap="round"
-      strokeLinejoin="round"
-      {...p}
-    >
-      <path d="M21 12a9 9 0 1 1-3-6.7" />
-      <polyline points="21 4 21 10 15 10" />
-    </svg>
-  ),
-  Dots: (p) => (
-    <svg width="14" height="14" viewBox="0 0 24 24" fill="currentColor" {...p}>
-      <circle cx="5" cy="12" r="1.6" />
-      <circle cx="12" cy="12" r="1.6" />
-      <circle cx="19" cy="12" r="1.6" />
-    </svg>
-  ),
-  Back: (p) => (
-    <svg
-      width="14"
-      height="14"
-      viewBox="0 0 24 24"
-      fill="none"
-      stroke="currentColor"
-      strokeWidth="2"
-      strokeLinecap="round"
-      strokeLinejoin="round"
-      {...p}
-    >
-      <polyline points="15 18 9 12 15 6" />
-    </svg>
-  ),
-  Logs: (p) => (
-    <svg
-      width="13"
-      height="13"
-      viewBox="0 0 24 24"
-      fill="none"
-      stroke="currentColor"
-      strokeWidth="2"
-      strokeLinecap="round"
-      strokeLinejoin="round"
-      {...p}
-    >
-      <line x1="8" y1="6" x2="21" y2="6" />
-      <line x1="8" y1="12" x2="21" y2="12" />
-      <line x1="8" y1="18" x2="21" y2="18" />
-      <line x1="3" y1="6" x2="3.01" y2="6" />
-      <line x1="3" y1="12" x2="3.01" y2="12" />
-      <line x1="3" y1="18" x2="3.01" y2="18" />
-    </svg>
-  ),
-  Trash: (p) => (
-    <svg
-      width="13"
-      height="13"
-      viewBox="0 0 24 24"
-      fill="none"
-      stroke="currentColor"
-      strokeWidth="2"
-      strokeLinecap="round"
-      strokeLinejoin="round"
-      {...p}
-    >
-      <polyline points="3 6 5 6 21 6" />
-      <path d="M19 6l-2 14a2 2 0 0 1-2 2H9a2 2 0 0 1-2-2L5 6" />
-      <path d="M10 11v6M14 11v6" />
-    </svg>
-  ),
-  Play: (p) => (
-    <svg width="13" height="13" viewBox="0 0 24 24" fill="currentColor" {...p}>
-      <polygon points="6 4 20 12 6 20 6 4" />
-    </svg>
-  ),
-  Close: (p) => (
-    <svg
-      width="12"
-      height="12"
-      viewBox="0 0 24 24"
-      fill="none"
-      stroke="currentColor"
-      strokeWidth="2.4"
-      strokeLinecap="round"
-      {...p}
-    >
-      <line x1="18" y1="6" x2="6" y2="18" />
-      <line x1="6" y1="6" x2="18" y2="18" />
-    </svg>
-  ),
-  Antenna: (p) => (
-    <svg
-      width="22"
-      height="22"
-      viewBox="0 0 24 24"
-      fill="none"
-      stroke="currentColor"
-      strokeWidth="1.6"
-      strokeLinecap="round"
-      strokeLinejoin="round"
-      {...p}
-    >
-      <circle cx="12" cy="12" r="2" />
-      <path d="M16.24 7.76a6 6 0 0 1 0 8.49M7.76 16.24a6 6 0 0 1 0-8.49" />
-      <path d="M19.07 4.93a10 10 0 0 1 0 14.14M4.93 19.07a10 10 0 0 1 0-14.14" />
-    </svg>
-  ),
-};
+const MARK_SRC = '/icons/icon48.png';
 
 // ── helpers ───────────────────────────────────────────────────────────────────
-function useNow(intervalMs = 1000) {
+function useNow(intervalMs = 30_000) {
   const [now, setNow] = useState(() => Date.now());
   useEffect(() => {
     const id = setInterval(() => setNow(Date.now()), intervalMs);
     return () => clearInterval(id);
   }, [intervalMs]);
   return now;
-}
-
-function fmtRemain(secs) {
-  if (secs == null) return '—';
-  if (secs <= 0) return '00:00:00';
-  const h = Math.floor(secs / 3600);
-  const m = Math.floor((secs % 3600) / 60);
-  const s = Math.floor(secs % 60);
-  return `${String(h).padStart(2, '0')}:${String(m).padStart(2, '0')}:${String(s).padStart(2, '0')}`;
-}
-
-function fmtClock(d) {
-  if (!d) return '—';
-  return new Date(d).toTimeString().slice(0, 5);
 }
 
 function deriveStatus(acc, nowMs) {
@@ -204,94 +38,23 @@ function deriveStatus(acc, nowMs) {
   return 'linked';
 }
 
-// ── sub-components ────────────────────────────────────────────────────────────
+const count = (n) => Number(n || 0).toLocaleString('en-IN');
+const plural = (n, one, many) => `${count(n)} ${n === 1 ? one : many}`;
 
-function StatusChip({ kind, children }) {
-  return (
-    <span className={`gnb-chip ${kind}`}>
-      <span className="dot" />
-      {children}
-    </span>
-  );
-}
+// ── FleetEdge ─────────────────────────────────────────────────────────────────
 
-function ConnectivitySummary({ accounts, pull }) {
-  const now = useNow(1000);
-  const buckets = useMemo(() => {
-    let ok = 0,
-      warn = 0,
-      err = 0;
-    for (const a of accounts) {
-      const s = deriveStatus(a, now);
-      if (s === 'linked') ok++;
-      else if (s === 'expiring') warn++;
-      else err++;
-    }
-    return { ok, warn, err };
-  }, [accounts, now]);
-
-  const pulling = pull?.pullingNow;
-  return (
-    <div className={`gnb-connectivity${pulling ? ' pulling' : ''}`}>
-      <div className="gnb-conn-line">
-        <span className="gnb-conn-seg ok">
-          <b>{buckets.ok}</b> connected
-        </span>
-        {buckets.warn > 0 && (
-          <span className="gnb-conn-seg warn">
-            <b>{buckets.warn}</b> expiring
-          </span>
-        )}
-        {buckets.err > 0 && (
-          <span className="gnb-conn-seg error">
-            <b>{buckets.err}</b> re-auth
-          </span>
-        )}
-        <span className="gnb-conn-seg">
-          last <b>{fmtClock(pull?.lastRunAt)}</b>
-        </span>
-        <span className="gnb-conn-seg">
-          next <b>~{fmtClock(pull?.nextRunAt)}</b>
-        </span>
-        {pulling && (
-          <span className="gnb-conn-pulse">
-            <span className="dot" /> pulling {typeof pulling === 'number' ? `(${pulling})` : ''}
-          </span>
-        )}
-      </div>
-    </div>
-  );
-}
-
-function AccountCard({ account, onAction }) {
-  const now = useNow(1000);
+function FleetEdgeAccountRow({ account, onAction }) {
+  const now = useNow();
   const status = deriveStatus(account, now);
-  const [menuOpen, setMenuOpen] = useState(false);
   const [renaming, setRenaming] = useState(false);
   const [draftName, setDraftName] = useState(account.friendlyName);
   const [syncedName, setSyncedName] = useState(account.friendlyName);
-  const menuRef = useRef(null);
 
   // Re-sync the rename draft when the account's name changes from outside (adjusting state during render).
   if (account.friendlyName !== syncedName) {
     setSyncedName(account.friendlyName);
     setDraftName(account.friendlyName);
   }
-
-  useEffect(() => {
-    if (!menuOpen) return;
-    const close = (e) => {
-      if (menuRef.current && !menuRef.current.contains(e.target)) setMenuOpen(false);
-    };
-    document.addEventListener('mousedown', close);
-    return () => document.removeEventListener('mousedown', close);
-  }, [menuOpen]);
-
-  const remSecs = account.expiresAt
-    ? Math.max(0, Math.floor((new Date(account.expiresAt).getTime() - now) / 1000))
-    : null;
-
-  const cardClass = `gnb-card is-${status === 'linked' ? 'ok' : status === 'expiring' ? 'warn' : 'error'}`;
 
   const commitRename = () => {
     setRenaming(false);
@@ -302,233 +65,259 @@ function AccountCard({ account, onAction }) {
       setDraftName(account.friendlyName);
     }
   };
+  const reconnect = () => onAction('reconnectAccount', { accountId: account.accountId });
+
+  const synced = ago(account.lastPullAt, now);
+  const mins = minutesUntil(account.expiresAt, now);
 
   return (
-    <div className={cardClass}>
-      <div className="gnb-card-top">
-        <div style={{ minWidth: 0, flex: 1 }}>
-          <div className="gnb-card-name">
-            {renaming ? (
-              <input
-                autoFocus
-                value={draftName}
-                onChange={(e) => setDraftName(e.target.value)}
-                onBlur={commitRename}
-                onKeyDown={(e) => {
-                  if (e.key === 'Enter') commitRename();
-                  if (e.key === 'Escape') {
-                    setDraftName(account.friendlyName);
-                    setRenaming(false);
-                  }
-                }}
-              />
-            ) : (
-              account.friendlyName
-            )}
-          </div>
-          <div className="gnb-fleetid">{account.fleetId}</div>
-        </div>
-        <div className="gnb-menu-wrap" ref={menuRef}>
-          <button
-            className="gnb-menu-btn"
-            onClick={() => setMenuOpen((v) => !v)}
-            aria-label="Account menu"
-          >
-            <Icon.Dots />
-          </button>
-          {menuOpen && (
-            <div className="gnb-menu-pop">
-              <button
-                onClick={() => {
-                  setMenuOpen(false);
-                  setRenaming(true);
-                }}
-              >
-                Rename
-              </button>
-              <button
-                onClick={() => {
-                  setMenuOpen(false);
-                  onAction('reconnectAccount', { accountId: account.accountId });
-                }}
-              >
-                Reconnect
-              </button>
-              <div className="gnb-divider" />
-              <button
-                className="danger"
-                onClick={() => {
-                  setMenuOpen(false);
-                  onAction('disconnectAccount', { accountId: account.accountId });
-                }}
-              >
-                Disconnect
-              </button>
-            </div>
+    <div className="acc">
+      <div className="acc-main">
+        <div className="acc-name" title={account.fleetId || undefined}>
+          {renaming ? (
+            <input
+              autoFocus
+              aria-label="Account name"
+              value={draftName}
+              onChange={(e) => setDraftName(e.target.value)}
+              onBlur={commitRename}
+              onKeyDown={(e) => {
+                if (e.key === 'Enter') commitRename();
+                if (e.key === 'Escape') {
+                  setDraftName(account.friendlyName);
+                  setRenaming(false);
+                }
+              }}
+            />
+          ) : (
+            account.friendlyName
           )}
         </div>
+        <div className="acc-meta">
+          {plural(account.vehicleCount ?? 0, 'vehicle', 'vehicles')}
+          {status === 'expiring'
+            ? ` · ends ${mins != null && mins > 0 ? `in ${mins} min` : 'soon'}`
+            : synced
+              ? ` · synced ${synced}`
+              : ''}
+        </div>
       </div>
-
-      <div className="gnb-card-row2">
-        {status === 'linked' && (
-          <StatusChip kind="ok">
-            Connected&nbsp;·&nbsp;<span className="gnb-countdown">{fmtRemain(remSecs)}</span>
-          </StatusChip>
-        )}
-        {status === 'expiring' && (
-          <StatusChip kind="warn">
-            Expires&nbsp;<span className="gnb-countdown">{fmtRemain(remSecs)}</span>
-          </StatusChip>
-        )}
-        {status === 'expired' && <StatusChip kind="error">Expired</StatusChip>}
-        <span className="count">{account.vehicleCount ?? 0} vehicles</span>
-      </div>
-
-      <div className="gnb-card-row3">
-        <span>pulled {fmtClock(account.lastPullAt)}</span>
+      <div className="acc-side">
+        {status === 'linked' && <Pill tone="ok">Connected</Pill>}
         {status === 'expiring' && (
           <button
-            className="reconnect"
-            onClick={() => onAction('reconnectAccount', { accountId: account.accountId })}
+            type="button"
+            className="btn btn--sm btn--warn-soft"
+            onClick={reconnect}
+            title="The session ends soon. Reconnect to keep syncing."
           >
-            <Icon.Reconnect /> Reconnect
+            Renew
           </button>
         )}
         {status === 'expired' && (
-          <button
-            className="reconnect error"
-            onClick={() => onAction('reconnectAccount', { accountId: account.accountId })}
-          >
-            <Icon.Reconnect /> Reconnect
+          <button type="button" className="btn btn--sm btn--crit-soft" onClick={reconnect}>
+            Reconnect
           </button>
         )}
+        <RowMenu
+          label={`Options for ${account.friendlyName}`}
+          items={[
+            { label: 'Rename', onSelect: () => setRenaming(true) },
+            { label: 'Reconnect', onSelect: reconnect },
+            'divider',
+            {
+              label: 'Disconnect',
+              danger: true,
+              onSelect: () => onAction('disconnectAccount', { accountId: account.accountId }),
+            },
+          ]}
+        />
       </div>
     </div>
   );
 }
 
-function MetricsGrid({ metrics }) {
-  const m = metrics || {};
-  const allDone = (m.pending || 0) + (m.inProgress || 0) === 0 && (m.completed || 0) > 0;
-  const awaiting = (m.pending || 0) + (m.noData || 0);
+function FleetEdgeCard({ accounts, pull, onAction }) {
+  const now = useNow();
+  const hasActive = accounts.some((a) => deriveStatus(a, now) === 'linked');
+  const vehicles = accounts.reduce((n, a) => n + (a.vehicleCount ?? 0), 0);
+  const pulling = Boolean(pull?.pullingNow);
+  const last = ago(pull?.lastRunAt, now);
+  const next = until(pull?.nextRunAt, now);
+
+  let sub = 'Not connected';
+  if (accounts.length) {
+    sub = `${plural(accounts.length, 'account', 'accounts')} · ${plural(vehicles, 'vehicle', 'vehicles')}`;
+  }
+  const syncNote = pulling
+    ? 'Syncing now…'
+    : [last && `Synced ${last}`, next && next !== 'now' && `next ${next}`]
+        .filter(Boolean)
+        .join(' · ') || 'Waiting for the first sync';
+
   return (
-    <div className="gnb-metrics">
-      <div className="gnb-metric-grid">
-        {[
-          { label: 'Pending', value: m.pending, tone: (m.pending || 0) > 0 ? 'warn' : 'zero' },
-          {
-            label: 'In Prog.',
-            value: m.inProgress,
-            tone: (m.inProgress || 0) > 0 ? 'warn' : 'zero',
-          },
-          { label: 'Completed', value: m.completed, tone: (m.completed || 0) > 0 ? 'ok' : 'zero' },
-          { label: 'Flagged', value: m.flagged, tone: (m.flagged || 0) > 0 ? 'danger' : 'zero' },
-          { label: 'No Data', value: m.noData, tone: (m.noData || 0) > 0 ? 'warn' : 'zero' },
-        ].map(({ label, value, tone }) => (
-          <div key={label} className={`gnb-metric ${tone}`}>
-            <span className="gnb-metric-label">{label}</span>
-            <span className="gnb-metric-value">{value ?? 0}</span>
+    <section className="prov" aria-labelledby="prov-fe">
+      <header className="prov-head">
+        <span className="prov-logo prov-logo--tata" aria-hidden="true">
+          TATA
+        </span>
+        <div className="prov-title">
+          <div className="prov-name" id="prov-fe">
+            Tata FleetEdge
           </div>
-        ))}
-      </div>
-      <div className={`gnb-metric-footer${allDone ? ' ok' : awaiting > 0 ? ' warn' : ''}`}>
-        <span className="dot" />
-        {allDone ? 'all caught up' : `${awaiting} awaiting pull`}
-      </div>
-    </div>
+          <div className="prov-sub">{sub}</div>
+        </div>
+        {accounts.length > 0 && (
+          <button
+            type="button"
+            className="btn btn--sm btn--ghost"
+            onClick={() => onAction('connectAccount')}
+          >
+            <IconPlus /> Add
+          </button>
+        )}
+      </header>
+
+      {accounts.length === 0 ? (
+        <div className="prov-empty">
+          <ol className="prov-steps">
+            <li>Open FleetEdge in a tab and sign in.</li>
+            <li>Come back here and press Connect.</li>
+          </ol>
+          <button
+            type="button"
+            className="btn btn--primary btn--block"
+            onClick={() => onAction('connectAccount')}
+          >
+            Connect FleetEdge
+          </button>
+        </div>
+      ) : (
+        <>
+          <div className="prov-rows">
+            {accounts.map((a) => (
+              <FleetEdgeAccountRow key={a.accountId} account={a} onAction={onAction} />
+            ))}
+          </div>
+          <footer className="prov-foot">
+            <span className="prov-foot-note">{syncNote}</span>
+            <button
+              type="button"
+              className="btn btn--sm btn--secondary"
+              disabled={!hasActive || pulling}
+              title={hasActive ? undefined : 'Reconnect an account first'}
+              onClick={() => onAction('pullNow')}
+            >
+              <IconSync className={pulling ? 'spin' : ''} /> {pulling ? 'Syncing' : 'Sync now'}
+            </button>
+          </footer>
+        </>
+      )}
+    </section>
   );
 }
 
-function EmptyAccounts({ onAction }) {
+// ── audit tasks ───────────────────────────────────────────────────────────────
+
+function TaskStats({ metrics }) {
+  const m = metrics || {};
+  const waiting = (m.pending || 0) + (m.inProgress || 0);
+  const done = m.completed || 0;
+  const flagged = m.flagged || 0;
+  const noData = m.noData || 0;
+  const caughtUp = waiting === 0 && done > 0;
   return (
-    <div className="gnb-empty">
-      <div className="gnb-empty-illus">
-        <span style={{ color: 'var(--accent)' }}>
-          <Icon.Antenna />
+    <section className="stats" aria-labelledby="stats-title">
+      <div className="stats-head">
+        <span className="stats-title" id="stats-title">
+          Audit tasks
+        </span>
+        <span className={`stats-state${caughtUp ? ' stats-state--ok' : ''}`}>
+          {caughtUp ? 'All caught up' : waiting ? `${count(waiting)} to sync` : ''}
         </span>
       </div>
-      <h3>Connect your first FleetEdge account</h3>
-      <p>
-        Open a FleetEdge tab, log in, then click below — we&apos;ll capture the session and start
-        syncing tasks.
-      </p>
-      <button
-        className="gnb-btn primary full"
-        style={{ marginTop: 14 }}
-        onClick={() => onAction('connectAccount')}
-      >
-        <Icon.Plus /> Connect FleetEdge account
-      </button>
-    </div>
+      <div className="stats-grid">
+        <div className={`stat${waiting ? ' stat--warn' : ''}`}>
+          <div className="stat-value">{count(waiting)}</div>
+          <div className="stat-label">Waiting</div>
+        </div>
+        <div className="stat">
+          <div className="stat-value">{count(done)}</div>
+          <div className="stat-label">Done</div>
+        </div>
+        <div className={`stat${flagged ? ' stat--crit' : ''}`}>
+          <div className="stat-value">{count(flagged)}</div>
+          <div className="stat-label">Flagged</div>
+        </div>
+      </div>
+      {noData > 0 && (
+        <p className="stats-note">
+          {plural(noData, 'task has', 'tasks have')} no FleetEdge data yet.
+        </p>
+      )}
+    </section>
   );
 }
+
+// ── sign in ───────────────────────────────────────────────────────────────────
 
 function LoginView({ onAction, loading, error }) {
   const [id, setId] = useState('');
   const [pw, setPw] = useState('');
+  const idField = useId();
+  const pwField = useId();
   const submit = (e) => {
     e.preventDefault();
     if (!id.trim() || !pw.trim() || loading) return;
     onAction('login', { emailOrMobile: id.trim(), password: pw });
   };
   return (
-    <div className="gnb-login">
-      <div className="gnb-login-head">
-        <svg
-          className="gnb-logo"
-          viewBox="0 0 24 24"
-          width="56"
-          height="56"
-          stroke="currentColor"
-          strokeWidth="1.5"
-          fill="none"
-          strokeLinecap="round"
-          strokeLinejoin="round"
-          style={{ display: 'block', margin: '0 auto 14px', borderRadius: 14 }}
-        >
-          <rect x="2" y="3" width="14" height="14" rx="2" />
-          <path d="M16 8l4 2v6h-4" />
-          <circle cx="6" cy="18" r="2" />
-          <circle cx="16" cy="18" r="2" />
-        </svg>
-        <h1>gnbedge</h1>
-        <div className="tagline">Fleet · Fuel · Audit</div>
+    <div className="login">
+      <div className="login-head">
+        <img className="gnb-mark" src={MARK_SRC} alt="" />
+        <h1>Sign in to GNB Edge</h1>
+        <p>Use your GNB account to connect your fleet data.</p>
       </div>
-      <form className="gnb-form" onSubmit={submit}>
-        <div className="gnb-field">
-          <label>Email or Mobile</label>
+      <form onSubmit={submit} noValidate>
+        <div className="field">
+          <label htmlFor={idField}>Email or mobile number</label>
           <input
+            id={idField}
             value={id}
             onChange={(e) => setId(e.target.value)}
-            placeholder="you@company.com"
+            autoComplete="username"
             autoFocus
           />
         </div>
-        <div className="gnb-field">
-          <label>Password</label>
+        <div className="field">
+          <label htmlFor={pwField}>Password</label>
           <input
+            id={pwField}
             type="password"
             value={pw}
             onChange={(e) => setPw(e.target.value)}
-            placeholder="••••••••"
+            autoComplete="current-password"
           />
         </div>
-        {error && <div className="gnb-login-err">{error}</div>}
+        {error && (
+          <p className="login-error" role="alert">
+            {error}
+          </p>
+        )}
         <button
           type="submit"
-          className="gnb-btn primary full"
+          className="btn btn--primary btn--block"
           disabled={loading || !id.trim() || !pw.trim()}
-          style={{ marginTop: 4 }}
         >
           {loading ? 'Signing in…' : 'Sign in'}
         </button>
       </form>
-      <div className="gnb-login-foot">
-        v {chrome.runtime.getManifest().version} · <span className="accent">secure session</span>
-      </div>
+      <div className="login-foot">Version {chrome.runtime.getManifest().version}</div>
     </div>
   );
 }
+
+// ── activity log ──────────────────────────────────────────────────────────────
 
 function LogsView({ logs, onAction }) {
   const sorted = useMemo(
@@ -537,70 +326,98 @@ function LogsView({ logs, onAction }) {
   );
   return (
     <>
-      <div className="gnb-logs-head">
-        <button className="back" onClick={() => onAction('viewHome')} aria-label="Back">
-          <Icon.Back />
+      <div className="logs-head">
+        <button
+          type="button"
+          className="gnb-icon-btn"
+          onClick={() => onAction('viewHome')}
+          aria-label="Back"
+        >
+          <IconBack />
         </button>
-        <h2>System logs</h2>
-        <span className="count">{sorted.length}</span>
-        <div className="actions">
-          <button className="gnb-btn ghost sm" onClick={() => onAction('refreshLogs')}>
-            <Icon.Refresh /> Refresh
-          </button>
-          <button className="gnb-btn danger-ghost sm" onClick={() => onAction('clearLogs')}>
-            <Icon.Trash /> Clear
-          </button>
-        </div>
+        <h2>Activity log</h2>
+        <button
+          type="button"
+          className="btn btn--sm btn--ghost"
+          onClick={() => onAction('refreshLogs')}
+        >
+          <IconRefresh /> Refresh
+        </button>
+        <button
+          type="button"
+          className="btn btn--sm btn--ghost"
+          onClick={() => onAction('clearLogs')}
+          disabled={sorted.length === 0}
+        >
+          Clear
+        </button>
       </div>
-      <div className="gnb-logs-list">
-        {sorted.length === 0 && (
-          <div className="gnb-empty" style={{ marginTop: 8 }}>
-            <h3>No logs yet</h3>
-            <p>Pull events and errors will appear here.</p>
+      <div className="logs-list">
+        {sorted.length === 0 ? (
+          <div className="logs-empty">
+            <strong>Nothing logged yet</strong>
+            Syncs and errors will show up here.
           </div>
+        ) : (
+          sorted.map((log, i) => (
+            <div key={i} className={`log log--${String(log.level || '').toLowerCase()}`}>
+              <span className="log-dot" aria-hidden="true" />
+              <span className="log-msg">{log.message}</span>
+              <span className="log-meta">
+                {new Date(log.timestamp).toLocaleString('en-IN', {
+                  day: 'numeric',
+                  month: 'short',
+                  hour: '2-digit',
+                  minute: '2-digit',
+                  second: '2-digit',
+                })}
+                {log.module ? ` · ${log.module}` : ''}
+              </span>
+            </div>
+          ))
         )}
-        {sorted.map((log, i) => (
-          <div key={i} className={`gnb-log ${log.level.toLowerCase()}`}>
-            <span className="ts">{new Date(log.timestamp).toTimeString().slice(0, 8)}</span>
-            <span className="lvl">{log.level}</span>
-            <span className="msg">
-              <span className="mod">[{log.module}]</span>
-              {log.message}
-            </span>
-          </div>
-        ))}
       </div>
     </>
   );
 }
 
+// ── overlays ──────────────────────────────────────────────────────────────────
+
 function Toast({ toast }) {
   if (!toast) return null;
   return (
-    <div className={`gnb-toast ${toast.kind || ''}`} key={toast.id}>
-      <span className="dot" />
+    <div
+      className={`toast${toast.kind ? ` toast--${toast.kind}` : ''}`}
+      key={toast.id}
+      role="status"
+    >
+      <span className="toast-dot" aria-hidden="true" />
       <span>{toast.message}</span>
     </div>
   );
 }
 
 function ExpiredBanner({ account, onAction, onDismiss }) {
-  const now = useNow(1000);
-  const amber = deriveStatus(account, now) === 'expiring';
+  const now = useNow();
+  const expiring = deriveStatus(account, now) === 'expiring';
   return (
-    <div className={`gnb-banner${amber ? ' amber' : ''}`}>
-      <div className="gnb-banner-text">
-        FleetEdge session for <strong>{account.friendlyName}</strong>{' '}
-        {amber ? 'expires soon' : 'expired'} — reconnect to keep pulling.
+    <div className={`notice ${expiring ? 'notice--warn' : 'notice--crit'}`} role="alert">
+      <div className="notice-text">
+        <strong>{account.friendlyName}</strong>{' '}
+        {expiring ? 'stops syncing soon.' : 'has stopped syncing.'} Reconnect to keep its data
+        coming in.
+        <div className="notice-actions">
+          <button
+            type="button"
+            className={`btn btn--sm ${expiring ? 'btn--warn-soft' : 'btn--crit-soft'}`}
+            onClick={() => onAction('reconnectAccount', { accountId: account.accountId })}
+          >
+            Reconnect
+          </button>
+        </div>
       </div>
-      <button
-        className="gnb-btn ghost sm"
-        onClick={() => onAction('reconnectAccount', { accountId: account.accountId })}
-      >
-        <Icon.Reconnect /> Reconnect
-      </button>
-      <button className="close" onClick={onDismiss} aria-label="Dismiss">
-        <Icon.Close />
+      <button type="button" className="notice-close" onClick={onDismiss} aria-label="Dismiss">
+        <IconClose />
       </button>
     </div>
   );
@@ -643,9 +460,9 @@ function ConfirmModal({ title, body, confirmLabel = 'Confirm', danger, onConfirm
   }, [onCancel]);
 
   return (
-    <div className="gnb-modal-backdrop" onClick={onCancel}>
+    <div className="modal-backdrop" onClick={onCancel}>
       <div
-        className="gnb-modal"
+        className="modal"
         ref={modalRef}
         role="dialog"
         aria-modal="true"
@@ -654,12 +471,18 @@ function ConfirmModal({ title, body, confirmLabel = 'Confirm', danger, onConfirm
       >
         <h3 id={titleId}>{title}</h3>
         <p>{body}</p>
-        <div className="gnb-modal-actions">
-          <button className="gnb-btn ghost sm" ref={cancelBtnRef} onClick={onCancel}>
+        <div className="modal-actions">
+          <button
+            type="button"
+            className="btn btn--secondary"
+            ref={cancelBtnRef}
+            onClick={onCancel}
+          >
             Cancel
           </button>
           <button
-            className={`gnb-btn sm ${danger ? 'danger-ghost' : 'primary'}`}
+            type="button"
+            className={`btn ${danger ? 'btn--danger' : 'btn--primary'}`}
             onClick={onConfirm}
           >
             {confirmLabel}
@@ -770,10 +593,7 @@ export default function Popup() {
 
           case 'connectAccount': {
             const granted = await chrome.permissions.request({
-              origins: [
-                'https://fleetedge.home.tatamotors/*',
-                'https://cvpauth.api.tatamotors/*',
-              ],
+              origins: ['https://fleetedge.home.tatamotors/*', 'https://cvpauth.api.tatamotors/*'],
             });
             if (!granted) {
               showToast('Permission denied — allow access to the fleet portal', 'err');
@@ -819,10 +639,7 @@ export default function Popup() {
           case 'reconnectAccount': {
             const { accountId } = payload;
             const granted = await chrome.permissions.request({
-              origins: [
-                'https://fleetedge.home.tatamotors/*',
-                'https://cvpauth.api.tatamotors/*',
-              ],
+              origins: ['https://fleetedge.home.tatamotors/*', 'https://cvpauth.api.tatamotors/*'],
             });
             if (!granted) {
               showToast('Permission denied', 'err');
@@ -960,18 +777,13 @@ export default function Popup() {
   // ── loading splash ───────────────────────────────────────────────────────
   if (appState === null) {
     return (
-      <div
-        className="gnb-popup"
-        style={{ display: 'flex', alignItems: 'center', justifyContent: 'center' }}
-      >
-        <span style={{ color: 'var(--fg-3)', fontFamily: 'var(--mono)', fontSize: 11 }}>
-          loading…
-        </span>
+      <div className="gnb-popup">
+        <div className="splash">Loading…</div>
       </div>
     );
   }
 
-  // ── login view ───────────────────────────────────────────────────────────
+  // ── sign in ──────────────────────────────────────────────────────────────
   if (!appState.authenticated || view === 'login') {
     return (
       <div className="gnb-popup">
@@ -981,10 +793,10 @@ export default function Popup() {
     );
   }
 
-  // ── logs view ────────────────────────────────────────────────────────────
+  // ── activity log ─────────────────────────────────────────────────────────
   if (view === 'logs') {
     return (
-      <div className="gnb-popup" style={{ display: 'flex', flexDirection: 'column' }}>
+      <div className="gnb-popup">
         <LogsView logs={logs} onAction={onAction} />
         <Toast toast={toast} />
         {confirming && (
@@ -1006,58 +818,43 @@ export default function Popup() {
     );
   }
 
-  // ── home view ────────────────────────────────────────────────────────────
+  // ── home ─────────────────────────────────────────────────────────────────
   const fe = appState.fleetEdge || { accounts: [], pull: {} };
   const accounts = fe.accounts || [];
-  const hasActive = accounts.some((a) => deriveStatus(a, Date.now()) === 'linked');
   const expiredAcc = accounts.find(
-    (a) =>
-      !dismissedBanners.has(a.accountId) &&
-      (deriveStatus(a, Date.now()) === 'expired' || deriveStatus(a, Date.now()) === 'expiring')
+    (a) => !dismissedBanners.has(a.accountId) && deriveStatus(a, Date.now()) === 'expired'
   );
+  const userName = (appState.user?.name || '').trim();
+  const role = String(appState.user?.role || '')
+    .toLowerCase()
+    .replace(/_/g, ' ');
 
   return (
     <div className="gnb-popup">
-      {/* titlebar */}
-      <div className="gnb-titlebar">
+      <header className="gnb-header">
+        <img className="gnb-mark" src={MARK_SRC} alt="" />
         <div className="gnb-brand">
-          <svg
-            className="gnb-logo"
-            viewBox="0 0 24 24"
-            width="22"
-            height="22"
-            stroke="currentColor"
-            strokeWidth="1.5"
-            fill="none"
-            strokeLinecap="round"
-            strokeLinejoin="round"
-          >
-            <rect x="2" y="3" width="14" height="14" rx="2" />
-            <path d="M16 8l4 2v6h-4" />
-            <circle cx="6" cy="18" r="2" />
-            <circle cx="16" cy="18" r="2" />
-          </svg>
-          <div>
-            <div className="gnb-brand-name">gnbedge</div>
+          <div className="gnb-brand-name">GNB Edge</div>
+          <div className="gnb-brand-sub">
+            {userName || 'Signed in'}
+            {role ? ` · ${role.charAt(0).toUpperCase()}${role.slice(1)}` : ''}
           </div>
-          <span className="gnb-brand-version">v {chrome.runtime.getManifest().version}</span>
         </div>
-        <div className="gnb-userbar">
-          <div className="gnb-avatar">
-            {(appState.user?.name || 'U').trim().charAt(0).toUpperCase()}
-          </div>
-          <div className="gnb-user-meta">
-            <span className="gnb-user-name">{appState.user?.name || 'User'}</span>
-            <span className="gnb-role-chip">{appState.user?.role || 'USER'}</span>
-          </div>
-          <button className="gnb-icon-btn" title="Sign out" onClick={() => onAction('logout')}>
-            <Icon.Logout />
-          </button>
-        </div>
-      </div>
+        <span className="gnb-avatar" aria-hidden="true">
+          {(userName || 'U').charAt(0).toUpperCase()}
+        </span>
+        <button
+          type="button"
+          className="gnb-icon-btn"
+          title="Sign out"
+          aria-label="Sign out"
+          onClick={() => onAction('logout')}
+        >
+          <IconLogout />
+        </button>
+      </header>
 
-      {/* body */}
-      <div className="gnb-body">
+      <main className="gnb-body">
         {expiredAcc && (
           <ExpiredBanner
             account={expiredAcc}
@@ -1066,58 +863,29 @@ export default function Popup() {
           />
         )}
 
-        <ConnectivitySummary accounts={accounts} pull={fe.pull || {}} />
+        <FleetEdgeCard accounts={accounts} pull={fe.pull || {}} onAction={onAction} />
 
-        {accounts.length === 0 ? (
-          <EmptyAccounts onAction={onAction} />
-        ) : (
-          <>
-            <div className="gnb-section-label">
-              Accounts <span className="gnb-section-count">{accounts.length}</span>
-            </div>
-            {accounts.map((a) => (
-              <AccountCard key={a.accountId} account={a} onAction={onAction} />
-            ))}
-            <div className="gnb-action-row" style={{ marginTop: 4 }}>
-              <button className="gnb-btn primary" onClick={() => onAction('connectAccount')}>
-                <Icon.Plus /> Connect another
-              </button>
-              <div
-                className="gnb-tip-wrap"
-                style={{ flex: 1, display: 'flex' }}
-                data-tip={hasActive ? '' : 'No active account'}
-              >
-                <button
-                  className="gnb-btn secondary"
-                  style={{ flex: 1 }}
-                  disabled={!hasActive || fe.pull?.pullingNow}
-                  onClick={() => onAction('pullNow')}
-                >
-                  <Icon.Play /> {fe.pull?.pullingNow ? 'Pulling…' : 'Pull from FleetEdge now'}
-                </button>
-              </div>
-            </div>
-          </>
-        )}
-
-        {/* iALERT section - below FleetEdge accounts */}
         <IalertSection showToast={showToast} confirm={setConfirming} />
 
-        <div className="gnb-section-label" style={{ marginTop: 4 }}>
-          Tasks
-        </div>
-        <MetricsGrid metrics={appState.metrics} />
-      </div>
+        {accounts.length > 0 && <TaskStats metrics={appState.metrics} />}
+      </main>
 
-      {/* footer */}
-      <div className="gnb-footer">
-        <button onClick={() => onAction('viewLogs')}>
-          <Icon.Logs /> View logs
+      <footer className="gnb-footer">
+        <button
+          type="button"
+          className="btn btn--sm btn--ghost"
+          onClick={() => onAction('viewLogs')}
+        >
+          <IconList /> Activity log
         </button>
-        <button className="danger" onClick={() => onAction('clearData')}>
-          <Icon.Trash /> Clear data
+        <button
+          type="button"
+          className="btn btn--sm btn--ghost danger"
+          onClick={() => onAction('clearData')}
+        >
+          Reset extension
         </button>
-      </div>
+      </footer>
 
       <Toast toast={toast} />
       {confirming && (
@@ -1132,13 +900,19 @@ export default function Popup() {
       )}
       {/* G-1: Tab picker — shown when multiple FleetEdge tabs are open */}
       {tabPicker && (
-        <div className="gnb-modal-backdrop" onClick={() => setTabPicker(null)}>
-          <div className="gnb-modal" onClick={(e) => e.stopPropagation()}>
-            <h3>Connect which FleetEdge tab?</h3>
-            <p>Multiple FleetEdge tabs are open. Choose the account to connect:</p>
-            <div style={{ display: 'flex', flexDirection: 'column', gap: 6, margin: '10px 0' }}>
+        <div className="modal-backdrop" onClick={() => setTabPicker(null)}>
+          <div
+            className="modal"
+            role="dialog"
+            aria-modal="true"
+            aria-label="Choose a FleetEdge tab"
+            onClick={(e) => e.stopPropagation()}
+          >
+            <h3>Which FleetEdge account?</h3>
+            <p>More than one FleetEdge tab is open. Pick the account to connect.</p>
+            <div className="modal-choices">
               {tabPicker.choices.map((c) => (
-                <label key={c.tabId} style={{ display: 'flex', alignItems: 'center', gap: 8, cursor: 'pointer' }}>
+                <label key={c.tabId} className="modal-choice">
                   <input
                     type="radio"
                     name="tabPick"
@@ -1146,14 +920,24 @@ export default function Popup() {
                     checked={tabPickerSelected === c.tabId}
                     onChange={() => setTabPickerSelected(c.tabId)}
                   />
-                  <span>{c.displayName}{c.fleetId && c.displayName !== c.fleetId ? ` (${c.fleetId})` : ''}</span>
+                  <span>
+                    {c.displayName}
+                    {c.fleetId && c.displayName !== c.fleetId ? ` (${c.fleetId})` : ''}
+                  </span>
                 </label>
               ))}
             </div>
-            <div className="gnb-modal-actions">
-              <button className="gnb-btn ghost sm" onClick={() => setTabPicker(null)}>Cancel</button>
+            <div className="modal-actions">
               <button
-                className="gnb-btn primary sm"
+                type="button"
+                className="btn btn--secondary"
+                onClick={() => setTabPicker(null)}
+              >
+                Cancel
+              </button>
+              <button
+                type="button"
+                className="btn btn--primary"
                 disabled={!tabPickerSelected}
                 onClick={() => onAction('connectAccount', { tabId: tabPickerSelected })}
               >

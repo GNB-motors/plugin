@@ -1,72 +1,54 @@
 /**
- * iALERT Popup Model — Pure helpers
- * Maps backend iALERT account data to UI-friendly formats.
+ * iALERT popup view-model — pure helpers over GET /extension/ialert/status rows:
+ *   { accountId, externalAccountId, friendlyName, accountStatus, status,
+ *     canSelfRenew, vehicleCount, lastDataAt, plan, lastErrorMessage, … }
  */
 
 /**
- * Map backend status to UI chip variant.
- * ACTIVE → ok (green)
- * NEEDS_REAUTH → warn (amber)
- * REVOKED / DISABLED → muted (grey)
- * Unknown → muted (grey)
+ * One badge per iALERT row — the same rules as the web app's Settings page
+ * (main-frontend ialertAccountsModel.connectionBadge). The account's admin
+ * state wins over the session state. iALERT sessions carry no expiry time,
+ * so none is shown.
+ * @returns {{ label: string, tone: 'ok' | 'warn' | 'crit' | 'muted' }}
  */
-export function mapStatusToChip(status) {
-  if (!status) return 'muted';
-  switch (status) {
-    case 'ACTIVE':
-      return 'ok';
-    case 'NEEDS_REAUTH':
-      return 'warn';
-    case 'REVOKED':
-    case 'DISABLED':
-      return 'muted';
-    default:
-      return 'muted';
+export function ialertBadge(row) {
+  if (row?.accountStatus === 'DISABLED') return { label: 'Disabled by admin', tone: 'muted' };
+  if (row?.accountStatus === 'AUTH_FAILED') return { label: 'Reconnect needed', tone: 'crit' };
+  if (row?.status === 'NEEDS_REAUTH') {
+    return row.canSelfRenew
+      ? { label: 'Renewing', tone: 'warn' }
+      : { label: 'Reconnect needed', tone: 'crit' };
   }
+  if (row?.status === 'ACTIVE') return { label: 'Connected', tone: 'ok' };
+  return { label: 'Unknown', tone: 'muted' };
+}
+
+/** The account's name as a person would say it. */
+export function ialertAccountName(row) {
+  if (row?.friendlyName) return row.friendlyName;
+  if (row?.externalAccountId) return `iALERT account ${row.externalAccountId}`;
+  return 'iALERT account';
 }
 
 /**
- * Get human-readable label for chip variant.
+ * The most urgent subscription note, or null. `plan.expired/next15/next30`
+ * are vehicle COUNTS per bucket.
+ * @returns {{ text: string, tone: 'warn' | 'crit' } | null}
  */
-export function getChipLabel(status) {
-  if (!status) return 'Unknown';
-  switch (status) {
-    case 'ACTIVE':
-      return 'Active';
-    case 'NEEDS_REAUTH':
-      return 'Reconnect needed';
-    case 'REVOKED':
-      return 'Revoked';
-    case 'DISABLED':
-      return 'Disabled';
-    default:
-      return status;
+export function ialertPlanNote(plan) {
+  if (!plan) return null;
+  const n = (k) => (Number.isFinite(plan[k]) ? plan[k] : 0);
+  const veh = (c) => `${c} ${c === 1 ? 'vehicle' : 'vehicles'}`;
+  if (n('expired') > 0) {
+    return { text: `Plan expired for ${veh(n('expired'))}`, tone: 'crit' };
   }
-}
-
-/**
- * Format expiresAt timestamp to local time string (HH:MM).
- * Returns '—' for null/undefined.
- */
-export function formatExpiresAt(expiresAt) {
-  if (!expiresAt) return '—';
-  try {
-    return new Date(expiresAt).toLocaleTimeString([], {
-      hour: '2-digit',
-      minute: '2-digit',
-    });
-  } catch {
-    return '—';
+  if (n('next15') > 0) {
+    return { text: `Plan ends within 15 days for ${veh(n('next15'))}`, tone: 'warn' };
   }
-}
-
-/**
- * Get display label for an account row.
- * Uses friendlyName if present, otherwise externalAccountId.
- */
-export function getAccountLabel(account) {
-  if (!account) return 'Unknown';
-  return account.friendlyName || account.externalAccountId || 'Unknown';
+  if (n('next30') > 0) {
+    return { text: `Plan ends within 30 days for ${veh(n('next30'))}`, tone: 'warn' };
+  }
+  return null;
 }
 
 /**
