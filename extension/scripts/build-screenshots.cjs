@@ -86,6 +86,19 @@ function dashboardState() {
       },
     },
     metrics: { pending: 12, inProgress: 0, completed: 1284, flagged: 7, noData: 3 },
+    // Synthetic iALERT account (store assets are public: no real owner id).
+    ialertAccounts: [
+      {
+        accountId: 'ia_1',
+        externalAccountId: '410001',
+        friendlyName: 'Eastern Depot',
+        status: 'ACTIVE',
+        accountStatus: 'ACTIVE',
+        vehicleCount: 48,
+        lastDataAt: new Date(now - 3 * 60 * 1000).toISOString(),
+        plan: null,
+      },
+    ],
     backendStatus: { pending: 12, inProgress: 0, completed: 1284, flagged: 7, noData: 3 },
   };
 }
@@ -114,7 +127,11 @@ function chromeStub(state, version) {
     'globalThis.chrome = {\n' +
     '  runtime: {\n' +
     '    getManifest: () => ({ version: __version }),\n' +
-    "    sendMessage: async (msg) => (msg && msg.type === 'GET_STATUS' ? __state : null),\n" +
+    '    sendMessage: async (msg) => {\n' +
+    "      if (msg && msg.type === 'GET_STATUS') return __state;\n" +
+    "      if (msg && msg.type === 'IALERT_STATUS') return { success: true, accounts: __state.ialertAccounts || [] };\n" +
+    '      return null;\n' +
+    '    },\n' +
     '    onMessage: { addListener() {}, removeListener() {} },\n' +
     '    lastError: undefined,\n' +
     "    id: 'screenshot',\n" +
@@ -213,7 +230,6 @@ function applyFrame(copy) {
 /** Promo tile: icon + wordmark on the brand ground, per CWS_SUBMISSION.md. */
 function applyTile() {
   const SANS = "-apple-system,BlinkMacSystemFont,'Segoe UI',Roboto,sans-serif";
-  const MONO = "ui-monospace,'SF Mono',Menlo,monospace";
 
   document.documentElement.style.cssText = 'margin:0';
   document.body.style.cssText = [
@@ -240,15 +256,12 @@ function applyTile() {
   block.style.cssText = 'color:#ffffff;min-width:0';
 
   const name = document.createElement('div');
-  name.textContent = 'gnbedge';
-  name.style.cssText = 'font-size:34px;font-weight:600;letter-spacing:-.03em;line-height:1';
+  name.textContent = 'GNB Edge';
+  name.style.cssText = 'font-size:34px;font-weight:700;letter-spacing:-.025em;line-height:1';
 
   const tagline = document.createElement('div');
-  tagline.textContent = 'Fleet · Fuel · Audit';
-  tagline.style.cssText =
-    'font-family:' +
-    MONO +
-    ';font-size:10px;letter-spacing:.2em;text-transform:uppercase;color:#60a5fa;margin-top:10px';
+  tagline.textContent = 'FleetEdge and iALERT, in one place';
+  tagline.style.cssText = 'font-size:12px;font-weight:600;color:#93c5fd;margin-top:10px';
 
   const pitch = document.createElement('div');
   pitch.textContent = 'Fleet fuel audits, automated.';
