@@ -9,11 +9,11 @@ const manifest = JSON.parse(readFileSync(new URL('../../../manifest.json', impor
 const IALERT = 'https://ialert.ashokleyland.com/*';
 
 describe('manifest — iALERT (option a)', () => {
-  it('declares the MAIN-world spy at document_start and the ISOLATED reader at document_idle', () => {
+  it('declares the MAIN-world spy and the ISOLATED reader, both at document_start (no early message lost)', () => {
     const scripts = manifest.content_scripts.filter((c) => c.matches.includes(IALERT));
     expect(scripts).toEqual([
       { matches: [IALERT], js: ['src/content/ialertSessionSpy.js'], run_at: 'document_start', world: 'MAIN' },
-      { matches: [IALERT], js: ['src/content/ialertSessionReader.js'], run_at: 'document_idle', world: 'ISOLATED' },
+      { matches: [IALERT], js: ['src/content/ialertSessionReader.js'], run_at: 'document_start', world: 'ISOLATED' },
     ]);
   });
 

@@ -1404,6 +1404,8 @@ describe('index.js — v2 improvements (handleMessage logic)', () => {
         fleetEdgeStatus: { cached: true },
         metrics: { pending: 5 },
         _lastTriggerAt: 999,
+        ialertMeta: { tokenValue: '179226993000200002', ialertUserId: '200002' },
+        ialertAccounts: [{ accountId: 'x' }],
       },
     });
 
@@ -1418,6 +1420,9 @@ describe('index.js — v2 improvements (handleMessage logic)', () => {
     expect(STORE.fleetEdgeStatus).toBeUndefined();
     expect(STORE.metrics).toBeUndefined();
     expect(STORE._lastTriggerAt).toBeUndefined();
+    // iALERT data belongs to this GNB user and must not survive a profile wipe
+    expect(STORE.ialertMeta).toBeUndefined();
+    expect(STORE.ialertAccounts).toBeUndefined();
     // Badge must be cleared
     expect(actionCalls.some((c) => c.badge === '')).toBe(true);
   });

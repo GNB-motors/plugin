@@ -89,7 +89,9 @@ export async function login(emailOrMobile, password) {
 }
 
 export async function logout() {
-  await removeStorage(['authToken', 'authUser']);
+  // iALERT link metadata belongs to the signed-in GNB user; a different user
+  // signing in next must never forward rotations under it.
+  await removeStorage(['authToken', 'authUser', 'ialertMeta', 'ialertAccounts']);
   logger.info('Logged out');
   bTel.info('Logged out');
 }

@@ -446,6 +446,9 @@ async function handleMessage(message, sender) {
         'fleetEdgeStatus',
         'metrics',
         '_lastTriggerAt',
+        // iALERT: link metadata + cached account rows belong to this GNB user.
+        'ialertMeta',
+        'ialertAccounts',
       ]);
       // G-3: Explicitly clear badge text (disconnectFleetEdge may not run if backend
       // call fails, so we force-clear here).

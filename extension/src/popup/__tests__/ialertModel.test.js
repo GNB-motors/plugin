@@ -119,6 +119,9 @@ describe('describeIalertProblem', () => {
     expect(describeIalertProblem(403, 'x')).toMatch(/owner or manager/);
     expect(describeIalertProblem(502, 'x')).toMatch(/server had a problem/);
     expect(describeIalertProblem(null, 'Failed to fetch')).toMatch(/Can't reach the GNB server/);
+    // backendFetch's own rewrites never leak the raw text (it carries the URL)
+    expect(describeIalertProblem(null, 'Request timed out after 15000ms')).toMatch(/Can't reach the GNB server/);
+    expect(describeIalertProblem(null, 'Backend unreachable (https://api.example/x)')).toMatch(/Can't reach the GNB server/);
     expect(describeIalertProblem(400, 'This iALERT session is too old')).toBe('This iALERT session is too old');
     expect(describeIalertProblem(null, '')).toMatch(/Press Retry/);
   });

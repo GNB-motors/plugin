@@ -87,7 +87,9 @@ export function describeIalertProblem(status, message) {
   }
   if (status === 429) return 'Too many requests right now. Wait a minute, then press Retry.';
   if (status >= 500) return 'The GNB server had a problem. Press Retry in a minute.';
-  if (/failed to fetch|network|timeout|abort/i.test(m)) {
+  // backendFetch rewrites failures to 'Request timed out after …' and
+  // 'Backend unreachable (…)' — never show those raw (they carry the URL).
+  if (/failed to fetch|network|timeout|timed out|unreachable|abort/i.test(m)) {
     return "Can't reach the GNB server. Check your internet, then press Retry.";
   }
   return m || 'Something went wrong. Press Retry.';

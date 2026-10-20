@@ -153,6 +153,14 @@ describe('ialertSessionReader (real module)', () => {
     expect(answer.session.tokenValue).toBe('1792285412001');
   });
 
+  it('accepts a different session when token_value has no comparable epoch prefix', () => {
+    onWindowMessage({ source: window, origin: ORIGIN, data: session('1792285412001') });
+    onWindowMessage({ source: window, origin: ORIGIN, data: session('abc') });
+    expect(sent).toHaveLength(2);
+    onWindowMessage({ source: window, origin: ORIGIN, data: session('abc') }); // same again
+    expect(sent).toHaveLength(2);
+  });
+
   it('answers READ_IALERT_SESSION only for this extension', () => {
     let answer = 'untouched';
     onRuntimeMessage({ type: 'READ_IALERT_SESSION' }, { id: 'other-ext' }, (r) => (answer = r));

@@ -25,7 +25,8 @@ function isFresher(newTokenValue) {
   if (!cachedSession) return true;
   const newPrefix = getEpochPrefix(newTokenValue);
   const oldPrefix = getEpochPrefix(cachedSession.tokenValue);
-  if (!newPrefix || !oldPrefix) return !cachedSession; // Default to new if can't compare
+  // Can't compare by login time: accept anything that is a different session.
+  if (!newPrefix || !oldPrefix) return newTokenValue !== cachedSession.tokenValue;
   return parseInt(newPrefix, 10) > parseInt(oldPrefix, 10);
 }
 
