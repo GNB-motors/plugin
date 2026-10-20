@@ -54,6 +54,7 @@ export const LAYERS = Object.freeze({
   MESSAGE: 'MESSAGE', // chrome.runtime messaging
   BACKEND: 'BACKEND', // Backend HTTP calls
   FLEETEDGE: 'FLEETEDGE', // FleetEdge connection & backend proxy status
+  IALERT: 'IALERT', // iALERT connection & backend proxy status
   STORAGE: 'STORAGE', // chrome.storage operations
   TOKEN: 'TOKEN', // FleetEdge token reading (content script)
   TASK: 'TASK', // Backend-side task processing events

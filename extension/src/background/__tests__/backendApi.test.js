@@ -196,6 +196,12 @@ describe('logout', () => {
     await logout();
     expect(chrome.storage.local.remove).toHaveBeenCalled();
   });
+
+  it('also removes the iALERT link metadata so the next GNB user never inherits it', async () => {
+    await logout();
+    const removed = chrome.storage.local.remove.mock.calls.flatMap((c) => c[0]);
+    expect(removed).toEqual(expect.arrayContaining(['ialertMeta', 'ialertAccounts']));
+  });
 });
 
 // ═══════════════════════════════════════════════════════════════════════════════

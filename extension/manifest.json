@@ -1,21 +1,36 @@
 {
   "manifest_version": 3,
   "name": "gnbedge",
-  "version": "0.0.0.4",
+  "version": "0.0.0.6",
   "description": "Connects to your fleet telematics provider and audits fuel consumption tasks through your organization backend.",
-  "permissions": ["storage", "alarms", "notifications", "browsingData"],
-  "host_permissions": ["https://api.app.gnbedge.in/*"],
+  "permissions": [
+    "storage",
+    "alarms",
+    "notifications",
+    "browsingData"
+  ],
+  "host_permissions": [
+    "https://api.app.gnbedge.in/*"
+  ],
   "optional_host_permissions": [
     "https://fleetedge.home.tatamotors/*",
     "https://cvpauth.api.tatamotors/*"
   ],
   "externally_connectable": {
-    "matches": ["https://app.gnbedge.in/*", "https://main-frontend-wine.vercel.app/*"]
+    "matches": [
+      "https://app.gnbedge.in/*",
+      "https://main-frontend-wine.vercel.app/*"
+    ]
   },
   "web_accessible_resources": [
     {
-      "resources": ["icons/icon16.png"],
-      "matches": ["https://app.gnbedge.in/*", "https://main-frontend-wine.vercel.app/*"]
+      "resources": [
+        "icons/icon16.png"
+      ],
+      "matches": [
+        "https://app.gnbedge.in/*",
+        "https://main-frontend-wine.vercel.app/*"
+      ]
     }
   ],
   "background": {
@@ -24,15 +39,43 @@
   },
   "content_scripts": [
     {
-      "matches": ["https://fleetedge.home.tatamotors/*"],
-      "js": ["src/content/networkSpy.js"],
+      "matches": [
+        "https://fleetedge.home.tatamotors/*"
+      ],
+      "js": [
+        "src/content/networkSpy.js"
+      ],
       "run_at": "document_start",
       "world": "MAIN"
     },
     {
-      "matches": ["https://fleetedge.home.tatamotors/*"],
-      "js": ["src/content/fleetedgeTokenReader.js"],
+      "matches": [
+        "https://fleetedge.home.tatamotors/*"
+      ],
+      "js": [
+        "src/content/fleetedgeTokenReader.js"
+      ],
       "run_at": "document_idle",
+      "world": "ISOLATED"
+    },
+    {
+      "matches": [
+        "https://ialert.ashokleyland.com/*"
+      ],
+      "js": [
+        "src/content/ialertSessionSpy.js"
+      ],
+      "run_at": "document_start",
+      "world": "MAIN"
+    },
+    {
+      "matches": [
+        "https://ialert.ashokleyland.com/*"
+      ],
+      "js": [
+        "src/content/ialertSessionReader.js"
+      ],
+      "run_at": "document_start",
       "world": "ISOLATED"
     }
   ],

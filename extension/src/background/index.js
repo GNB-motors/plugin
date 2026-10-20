@@ -21,6 +21,13 @@ import {
   resetNotifiedAccounts,
   pushRotatedRefreshToken,
 } from './fleetedgeLink.js';
+import {
+  openIalertForSignIn,
+  linkIalertSession,
+  forwardIalertRotation,
+  refreshIalertStatus,
+  unlinkIalert,
+} from './ialertLink.js';
 import { getStorage, setStorage, removeStorage } from './utils.js';
 import { getLogs, clearLogs, createLogger } from './logger.js';
 import { login, logout, isAuthenticated, backendFetch, fetchStatus } from './backendApi.js';
@@ -39,6 +46,7 @@ import { config } from './config.js';
 
 const logger = createLogger('ServiceWorker');
 const tlog = createLayerLogger(LAYERS.MESSAGE);
+const ialertTel = createLayerLogger(LAYERS.IALERT);
 const taskTel = createLayerLogger(LAYERS.TASK);
 
 // ─── Status Deduplication ────────────────────────────────────────────────────
@@ -136,7 +144,7 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
   // Ignore messages from content scripts that aren't meant for us
   if (message.type === 'READ_FLEETEDGE_TOKEN') return false;
 
-  handleMessage(message)
+  handleMessage(message, sender)
     .then(sendResponse)
     .catch((err) => {
       logger.error('Message handler error', err.message);
@@ -161,7 +169,16 @@ chrome.runtime.onMessageExternal.addListener((message, _sender, sendResponse) =>
   sendResponse({ ok: false, error: 'unsupported_message_type' });
 });
 
-async function handleMessage(message) {
+/** Exact-origin check for iALERT content-script messages (no prefix match). */
+function isIalertSender(sender) {
+  try {
+    return new URL(sender?.url || '').origin === 'https://ialert.ashokleyland.com';
+  } catch {
+    return false;
+  }
+}
+
+async function handleMessage(message, sender) {
   switch (message.type) {
     case 'LOGIN': {
       const { emailOrMobile, password } = message;
@@ -305,6 +322,58 @@ async function handleMessage(message) {
       return pushRotatedRefreshToken(message.fleetId, message.refreshToken);
     }
 
+    // ─── iALERT Connection ──────────────────────────────────────────
+
+    case 'IALERT_SESSION_CAPTURED': {
+      // Verify sender is our extension
+      if (sender.id !== chrome.runtime.id) {
+        ialertTel.warn('IALERT_SESSION_CAPTURED rejected: wrong sender id');
+        return { success: false, error: 'Invalid sender' };
+      }
+      // Verify sender is from iALERT origin
+      if (!isIalertSender(sender)) {
+        ialertTel.warn('IALERT_SESSION_CAPTURED rejected: wrong origin');
+        return { success: false, error: 'Invalid origin' };
+      }
+      tlog.info('iALERT session captured');
+      return linkIalertSession(message.session);
+    }
+
+    case 'IALERT_TOKEN_ROTATED': {
+      // Verify sender is our extension
+      if (sender.id !== chrome.runtime.id) {
+        ialertTel.warn('IALERT_TOKEN_ROTATED rejected: wrong sender id');
+        return { success: false, error: 'Invalid sender' };
+      }
+      // Verify sender is from iALERT origin
+      if (!isIalertSender(sender)) {
+        ialertTel.warn('IALERT_TOKEN_ROTATED rejected: wrong origin');
+        return { success: false, error: 'Invalid origin' };
+      }
+      tlog.info('iALERT token rotated');
+      return forwardIalertRotation({ token: message.token, refreshToken: message.refreshToken });
+    }
+
+    case 'IALERT_ENABLE': {
+      tlog.info('iALERT connect requested');
+      return openIalertForSignIn();
+    }
+
+    case 'IALERT_STATUS': {
+      const status = await refreshIalertStatus();
+      return {
+        enabled: true,
+        accounts: status.accounts || [],
+        error: status.success ? null : status.error,
+        errorStatus: status.success ? null : status.errorStatus,
+      };
+    }
+
+    case 'IALERT_UNLINK': {
+      tlog.info('iALERT unlink requested');
+      return unlinkIalert(message.accountId || null);
+    }
+
     // ─── Trigger backend processing (optional manual trigger) ──────────
 
     case 'TRIGGER_PROCESS': {
@@ -377,6 +446,9 @@ async function handleMessage(message) {
         'fleetEdgeStatus',
         'metrics',
         '_lastTriggerAt',
+        // iALERT: link metadata + cached account rows belong to this GNB user.
+        'ialertMeta',
+        'ialertAccounts',
       ]);
       // G-3: Explicitly clear badge text (disconnectFleetEdge may not run if backend
       // call fails, so we force-clear here).

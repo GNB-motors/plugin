@@ -89,7 +89,9 @@ export async function login(emailOrMobile, password) {
 }
 
 export async function logout() {
-  await removeStorage(['authToken', 'authUser']);
+  // iALERT link metadata belongs to the signed-in GNB user; a different user
+  // signing in next must never forward rotations under it.
+  await removeStorage(['authToken', 'authUser', 'ialertMeta', 'ialertAccounts']);
   logger.info('Logged out');
   bTel.info('Logged out');
 }
@@ -138,6 +140,8 @@ export async function backendFetch(path, options = {}) {
       body.message || `Backend ${options.method || 'GET'} ${path} failed: ${response.status}`
     );
     err.status = response.status;
+    // The backend's machine-readable reason (e.g. IALERT_TOKEN_TOO_OLD).
+    if (typeof body.code === 'string') err.code = body.code;
     // Parse Retry-After (seconds-as-integer per RFC 7231; HTTP-date form also
     // supported) so withRetry can honor 429 backpressure once before failing.
     if (response.status === 429) {

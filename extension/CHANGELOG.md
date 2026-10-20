@@ -2,6 +2,18 @@
 
 ---
 
+## [2026-10-20] — branch: feat/ialert-connector
+
+### Added iALERT telematics support (P1–P5)
+
+- **P1–P3**: Background module (`ialertLink.js`) handles session capture, token forwarding, and account status via backend APIs (`/extension/ialert/link-token`, `/extension/ialert/status`, `/extension/ialert/unlink`).
+- **P4**: Popup section (`IalertSection.jsx` + `ialertModel.js`) renders connected iALERT accounts with status chips (ACTIVE/NEEDS_REAUTH/REVOKED/DISABLED), expiry time, vehicle count, and unlink action. Shows "Connect iALERT" card when no accounts linked.
+- **P1 (option a, owner decision 2026-10-21)**: the iALERT capture scripts are declared statically in the manifest for `https://ialert.ashokleyland.com/*`. **Chrome disables the extension on update until each existing user re-approves it** (FleetEdge syncing pauses until then) — warn customers before releasing. "Connect iALERT" just opens iALERT for sign-in; no runtime permission or `scripting` permission.
+- **P5**: CWS submission docs list Ashok Leyland iALERT and its content scripts.
+- Pure model helpers in `ialertModel.js` for testability; component follows existing FleetEdge visual patterns (`gnb-card`, `StatusChip`).
+
+---
+
 ## [2026-09-10] — branch: main (no version bump — packaging + tooling only)
 
 ### Fixed the release pipeline that 0.0.0.4 exposed, and stopped it from drifting again
