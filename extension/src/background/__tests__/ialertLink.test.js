@@ -8,7 +8,6 @@ import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
 describe('ialertLink', () => {
   let store = {};
   let fetchMock;
-  let permissionsGranted = false;
 
   // Shared chrome mock
   const makeChrome = () => ({
@@ -31,18 +30,6 @@ describe('ialertLink', () => {
         }),
       },
     },
-    permissions: {
-      request: vi.fn(({ origins }) => {
-        if (origins?.[0]?.includes('ialert.ashokleyland.com')) {
-          permissionsGranted = true;
-          return Promise.resolve(true);
-        }
-        return Promise.resolve(false);
-      }),
-      contains: vi.fn(({ origins }) => {
-        return Promise.resolve(permissionsGranted && origins?.[0]?.includes('ialert.ashokleyland.com'));
-      }),
-    },
     tabs: {
       create: vi.fn(() => Promise.resolve({ id: 1 })),
     },
@@ -53,7 +40,6 @@ describe('ialertLink', () => {
     vi.resetModules();
     store = { authToken: 'test-jwt-token' }; // Add auth token by default
     fetchMock = null;
-    permissionsGranted = false;
     vi.stubGlobal('chrome', makeChrome());
   });
 
