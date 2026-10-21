@@ -38,7 +38,7 @@ test('popup loads without errors', async () => {
   // The popup should render the login view (unauthenticated in a fresh profile)
   const heading = page.locator('h1');
   await expect(heading).toBeVisible();
-  await expect(heading).toHaveText('gnbedge');
+  await expect(heading).toHaveText('Sign in to GNB Edge');
 
   // Ensure the React root container is present
   await expect(page.locator('#root')).toBeVisible();
