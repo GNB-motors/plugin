@@ -7,6 +7,7 @@ import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
 
 describe('ialertLink', () => {
   let store = {};
+  let session = {};
   let fetchMock;
 
   // Shared chrome mock
@@ -32,7 +33,11 @@ describe('ialertLink', () => {
     },
     tabs: {
       create: vi.fn(() => Promise.resolve({ id: 1 })),
+      sendMessage: vi.fn(() => Promise.resolve(null)),
+      update: vi.fn(() => Promise.resolve({})),
+      get: vi.fn((id) => Promise.resolve({ id, windowId: 7 })),
     },
+    windows: { update: vi.fn(() => Promise.resolve({})) },
   });
 
   beforeEach(() => {
@@ -41,6 +46,18 @@ describe('ialertLink', () => {
     store = { authToken: 'test-jwt-token' }; // Add auth token by default
     fetchMock = null;
     vi.stubGlobal('chrome', makeChrome());
+    session = {};
+    chrome.storage.session = {
+      get: vi.fn((keys) =>
+        Promise.resolve(
+          Object.fromEntries(keys.filter((k) => k in session).map((k) => [k, session[k]]))
+        )
+      ),
+      set: vi.fn((data) => {
+        Object.assign(session, data);
+        return Promise.resolve();
+      }),
+    };
   });
 
   afterEach(() => {
@@ -300,6 +317,136 @@ describe('ialertLink', () => {
 
       expect(fetchMock).not.toHaveBeenCalled();
       expect(result.skipped).toBe(true);
+    });
+  });
+
+  describe('connectIalert (the popup button)', () => {
+    const SESSION = {
+      token: 'A',
+      refreshToken: null,
+      tokenValue: '179226993000200002',
+      ialertUserId: '200002',
+      ialertOwnerId: '410001',
+    };
+    const linkOk = (data = { accountId: 'acc-1', refreshStored: false }) =>
+      vi.fn(() =>
+        Promise.resolve({ ok: true, json: () => Promise.resolve({ status: 'success', data }) })
+      );
+    const bannersTo = () =>
+      chrome.tabs.sendMessage.mock.calls
+        .filter(([, m]) => m.type === 'GNB_BANNER')
+        .map(([id, m]) => [id, m.banner]);
+
+    it('links the session an open, signed-in iALERT tab holds, and confirms on that tab', async () => {
+      fetchMock = linkOk();
+      const { mod } = await setupIalertLink();
+      await mod.trackIalertTab(11);
+      chrome.tabs.sendMessage.mockImplementation((id, m) =>
+        Promise.resolve(
+          m.type === 'READ_IALERT_SESSION' ? { success: true, session: SESSION } : { success: true }
+        )
+      );
+      const result = await mod.connectIalert();
+      expect(result).toMatchObject({
+        success: true,
+        state: 'LINKED',
+        accountId: 'acc-1',
+        refreshStored: false,
+      });
+      expect(bannersTo()).toEqual([[11, expect.objectContaining({ tone: 'ok' })]]);
+      expect(chrome.tabs.create).not.toHaveBeenCalled();
+    });
+
+    it('a too-old sign-in asks for a fresh iALERT sign-in on that tab', async () => {
+      fetchMock = vi.fn(() =>
+        Promise.resolve({
+          ok: false,
+          status: 400,
+          headers: { get: () => null },
+          json: () => Promise.resolve({ code: 'IALERT_TOKEN_TOO_OLD', message: 'too old' }),
+        })
+      );
+      const { mod } = await setupIalertLink();
+      await mod.trackIalertTab(11);
+      chrome.tabs.sendMessage.mockImplementation((id, m) =>
+        Promise.resolve(
+          m.type === 'READ_IALERT_SESSION' ? { success: true, session: SESSION } : { success: true }
+        )
+      );
+      const result = await mod.connectIalert();
+      expect(result).toMatchObject({ success: false, state: 'SIGN_IN_AGAIN' });
+      expect(bannersTo()[0][1]).toMatchObject({ tone: 'warn', title: 'Sign in to iALERT again' });
+    });
+
+    it('any other link failure is FAILED with an error banner', async () => {
+      fetchMock = vi.fn(() =>
+        Promise.resolve({
+          ok: false,
+          status: 500,
+          headers: { get: () => null },
+          json: () => Promise.resolve({ message: 'boom' }),
+        })
+      );
+      const { mod } = await setupIalertLink();
+      await mod.trackIalertTab(11);
+      chrome.tabs.sendMessage.mockImplementation((id, m) =>
+        Promise.resolve(
+          m.type === 'READ_IALERT_SESSION' ? { success: true, session: SESSION } : { success: true }
+        )
+      );
+      const result = await mod.connectIalert();
+      expect(result).toMatchObject({ success: false, state: 'FAILED' });
+      expect(bannersTo()[0][1].tone).toBe('err');
+    });
+
+    it('an open tab without a sign-in is focused and told what to do', async () => {
+      const { mod } = await setupIalertLink();
+      await mod.trackIalertTab(11);
+      chrome.tabs.sendMessage.mockImplementation(() =>
+        Promise.resolve({ success: true, session: null })
+      );
+      const result = await mod.connectIalert();
+      expect(result).toEqual({ success: true, state: 'WAITING', tab: 'focused' });
+      expect(chrome.tabs.update).toHaveBeenCalledWith(11, { active: true });
+      expect(chrome.windows.update).toHaveBeenCalledWith(7, { focused: true });
+      expect(bannersTo()[0][1]).toMatchObject({ tone: 'progress', title: 'Sign in to iALERT' });
+      expect(chrome.tabs.create).not.toHaveBeenCalled();
+    });
+
+    it('a tab that no longer answers is forgotten, and iALERT opens instead', async () => {
+      const { mod } = await setupIalertLink();
+      await mod.trackIalertTab(11);
+      chrome.tabs.sendMessage.mockImplementation(() =>
+        Promise.reject(new Error('Could not establish connection. Receiving end does not exist.'))
+      );
+      const result = await mod.connectIalert();
+      expect(result).toEqual({ success: true, state: 'WAITING', tab: 'opened' });
+      expect(chrome.tabs.create).toHaveBeenCalledWith({ url: 'https://ialert.ashokleyland.com/' });
+      expect(session.ialertTabIds).toEqual([]);
+    });
+
+    it('no known iALERT tab: opens iALERT', async () => {
+      const { mod } = await setupIalertLink();
+      const result = await mod.connectIalert();
+      expect(result).toEqual({ success: true, state: 'WAITING', tab: 'opened' });
+    });
+
+    it('asks the newest tab first and keeps tab ids only', async () => {
+      fetchMock = linkOk();
+      const { mod } = await setupIalertLink();
+      await mod.trackIalertTab(11);
+      await mod.trackIalertTab(22);
+      await mod.trackIalertTab(11); // reload of tab 11 → newest again
+      expect(session.ialertTabIds).toEqual([22, 11]);
+      chrome.tabs.sendMessage.mockImplementation((id, m) =>
+        Promise.resolve(
+          m.type === 'READ_IALERT_SESSION' ? { success: true, session: SESSION } : { success: true }
+        )
+      );
+      await mod.connectIalert();
+      expect(chrome.tabs.sendMessage.mock.calls[0][0]).toBe(11);
+      await mod.untrackIalertTab(22);
+      expect(session.ialertTabIds).toEqual([11]);
     });
   });
 

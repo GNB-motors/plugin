@@ -53,8 +53,8 @@ describe('ialertSessionSpy (real module)', () => {
   });
 
   it('a decrypted refresh response posts IALERT_ROTATED', async () => {
-    const decrypt = await loadSpy(async () =>
-      enc({ data: { token: 'NEW-A', refresh_token: 'NEW-R' } }).buffer,
+    const decrypt = await loadSpy(
+      async () => enc({ data: { token: 'NEW-A', refresh_token: 'NEW-R' } }).buffer
     );
     await decrypt({}, {}, new Uint8Array());
     expect(posted.map((p) => p.msg)).toEqual([
@@ -79,7 +79,7 @@ describe('ialertSessionSpy (real module)', () => {
     expect(realDecrypt).toHaveBeenCalledTimes(1);
   });
 
-  it("a failing page decrypt rejects to the page unchanged and is not retried", async () => {
+  it('a failing page decrypt rejects to the page unchanged and is not retried', async () => {
     const boom = new Error('OperationError');
     const decrypt = await loadSpy(async () => {
       throw boom;
@@ -93,10 +93,16 @@ describe('ialertSessionSpy (real module)', () => {
 describe('ialertSessionReader (real module)', () => {
   let onWindowMessage;
   let onRuntimeMessage;
-  let sent;
+  let sent; // messages to the background, minus the IALERT_TAB_READY ping
+  let pings;
+  let banners;
+  let reply; // what the background answers to IALERT_SESSION_CAPTURED
 
   async function loadReader() {
     sent = [];
+    pings = [];
+    banners = [];
+    reply = { success: true, accountId: 'a1', refreshStored: false };
     const win = {
       addEventListener: (type, fn) => {
         if (type === 'message') onWindowMessage = fn;
@@ -106,14 +112,27 @@ describe('ialertSessionReader (real module)', () => {
     vi.stubGlobal('chrome', {
       runtime: {
         id: 'ext-id',
-        sendMessage: (m) => sent.push(m),
+        sendMessage: async (m) => {
+          if (m.type === 'IALERT_TAB_READY') {
+            pings.push(m);
+            return { success: true };
+          }
+          sent.push(m);
+          return typeof reply === 'function' ? reply() : reply;
+        },
         onMessage: { addListener: (fn) => (onRuntimeMessage = fn) },
       },
     });
     vi.resetModules();
+    vi.doMock('../gnbBanner.js', () => ({
+      showGnbBanner: (b) => banners.push(b),
+      hideGnbBanner: () => {},
+    }));
     await import('../ialertSessionReader.js');
     return win;
   }
+
+  const flush = () => new Promise((r) => setTimeout(r, 0));
 
   const session = (tokenValue) => ({
     type: 'IALERT_SESSION',
@@ -137,7 +156,11 @@ describe('ialertSessionReader (real module)', () => {
   });
 
   it('ignores a wrong origin, a foreign source and a wrong type', () => {
-    onWindowMessage({ source: window, origin: 'https://evil.example', data: session('1792285412001') });
+    onWindowMessage({
+      source: window,
+      origin: 'https://evil.example',
+      data: session('1792285412001'),
+    });
     onWindowMessage({ source: {}, origin: ORIGIN, data: session('1792285412001') });
     onWindowMessage({ source: window, origin: ORIGIN, data: { type: 'OTHER' } });
     expect(sent).toHaveLength(0);
@@ -148,7 +171,11 @@ describe('ialertSessionReader (real module)', () => {
     onWindowMessage({ source: window, origin: ORIGIN, data: session('1792285000001') }); // older
     expect(sent).toHaveLength(1);
     let answer;
-    const handled = onRuntimeMessage({ type: 'READ_IALERT_SESSION' }, { id: 'ext-id' }, (r) => (answer = r));
+    const handled = onRuntimeMessage(
+      { type: 'READ_IALERT_SESSION' },
+      { id: 'ext-id' },
+      (r) => (answer = r)
+    );
     expect(handled).toBe(false);
     expect(answer.session.tokenValue).toBe('1792285412001');
   });
@@ -159,6 +186,63 @@ describe('ialertSessionReader (real module)', () => {
     expect(sent).toHaveLength(2);
     onWindowMessage({ source: window, origin: ORIGIN, data: session('abc') }); // same again
     expect(sent).toHaveLength(2);
+  });
+
+  it('pings IALERT_TAB_READY once at load, with no session data', () => {
+    expect(pings).toEqual([{ type: 'IALERT_TAB_READY' }]);
+  });
+
+  it('shows "connecting" then "connected, keep this tab open" when no refresh token was stored', async () => {
+    onWindowMessage({ source: window, origin: ORIGIN, data: session('1792285412001') });
+    await flush();
+    expect(banners.map((b) => b.tone)).toEqual(['progress', 'ok']);
+    expect(banners[1].body).toMatch(/Keep this iALERT tab open/);
+  });
+
+  it('says the tab can be closed when the backend stored a refresh token', async () => {
+    reply = { success: true, accountId: 'a1', refreshStored: true };
+    onWindowMessage({ source: window, origin: ORIGIN, data: session('1792285412001') });
+    await flush();
+    expect(banners[1].body).toMatch(/You can close this tab/);
+  });
+
+  it('asks the user to sign in to GNB Edge when the extension is signed out', async () => {
+    reply = { success: false, error: 'Not authenticated — please log in first' };
+    onWindowMessage({ source: window, origin: ORIGIN, data: session('1792285412001') });
+    await flush();
+    expect(banners[1]).toMatchObject({ tone: 'warn', title: 'Almost there: sign in to GNB Edge' });
+  });
+
+  it('asks for a fresh iALERT sign-in when the backend says the sign-in is too old', async () => {
+    reply = { success: false, code: 'IALERT_TOKEN_TOO_OLD', error: 'too old' };
+    onWindowMessage({ source: window, origin: ORIGIN, data: session('1792285412001') });
+    await flush();
+    expect(banners[1]).toMatchObject({ tone: 'warn', title: 'Sign in to iALERT again' });
+  });
+
+  it('shows an error banner when the background is unreachable', async () => {
+    reply = () => Promise.reject(new Error('Extension context invalidated.'));
+    onWindowMessage({ source: window, origin: ORIGIN, data: session('1792285412001') });
+    await flush();
+    expect(banners[1]).toMatchObject({ tone: 'err', body: 'Extension context invalidated.' });
+  });
+
+  it('shows a GNB_BANNER only for this extension', () => {
+    let answer = 'untouched';
+    onRuntimeMessage(
+      { type: 'GNB_BANNER', banner: { tone: 'ok', title: 'x' } },
+      { id: 'other-ext' },
+      (r) => (answer = r)
+    );
+    expect(answer).toBe('untouched');
+    expect(banners).toHaveLength(0);
+    onRuntimeMessage(
+      { type: 'GNB_BANNER', banner: { tone: 'ok', title: 'x' } },
+      { id: 'ext-id' },
+      (r) => (answer = r)
+    );
+    expect(answer).toEqual({ success: true });
+    expect(banners).toEqual([{ tone: 'ok', title: 'x' }]);
   });
 
   it('answers READ_IALERT_SESSION only for this extension', () => {

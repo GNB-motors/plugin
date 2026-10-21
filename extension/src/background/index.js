@@ -20,9 +20,12 @@ import {
   renameFleetEdgeAccount,
   resetNotifiedAccounts,
   pushRotatedRefreshToken,
+  completeFleetEdgeLink,
 } from './fleetedgeLink.js';
 import {
-  openIalertForSignIn,
+  connectIalert,
+  trackIalertTab,
+  untrackIalertTab,
   linkIalertSession,
   forwardIalertRotation,
   refreshIalertStatus,
@@ -169,14 +172,21 @@ chrome.runtime.onMessageExternal.addListener((message, _sender, sendResponse) =>
   sendResponse({ ok: false, error: 'unsupported_message_type' });
 });
 
-/** Exact-origin check for iALERT content-script messages (no prefix match). */
-function isIalertSender(sender) {
+/** Exact-origin check for content-script messages (no prefix match). */
+function isSenderFrom(sender, origin) {
   try {
-    return new URL(sender?.url || '').origin === 'https://ialert.ashokleyland.com';
+    return new URL(sender?.url || '').origin === origin;
   } catch {
     return false;
   }
 }
+const isIalertSender = (sender) => isSenderFrom(sender, 'https://ialert.ashokleyland.com');
+const isFleetEdgeSender = (sender) => isSenderFrom(sender, 'https://fleetedge.home.tatamotors');
+
+// A closed tab can no longer be asked for an iALERT session.
+chrome.tabs.onRemoved.addListener((tabId) => {
+  untrackIalertTab(tabId).catch(() => {});
+});
 
 async function handleMessage(message, sender) {
   switch (message.type) {
@@ -316,6 +326,15 @@ async function handleMessage(message, sender) {
       return status;
     }
 
+    case 'FLEETEDGE_LINK_DONE': {
+      // The FleetEdge tab's "connected, closing in 5 s" countdown ended.
+      // completeFleetEdgeLink() only acts when a link just asked for it.
+      if (sender.id !== chrome.runtime.id || !isFleetEdgeSender(sender)) {
+        return { success: false, error: 'Invalid sender' };
+      }
+      return completeFleetEdgeLink();
+    }
+
     case 'FLEETEDGE_REFRESH_ROTATED': {
       // Content script intercepted a browser-side refresh-token rotation.
       // Single-use tokens: push it so the backend's copy stays current.
@@ -336,7 +355,31 @@ async function handleMessage(message, sender) {
         return { success: false, error: 'Invalid origin' };
       }
       tlog.info('iALERT session captured');
-      return linkIalertSession(message.session);
+      const linked = await linkIalertSession(message.session);
+      if (linked.success) {
+        try {
+          chrome.notifications.create('gnb-ialert-linked', {
+            type: 'basic',
+            iconUrl: 'icons/icon48.png',
+            title: 'iALERT connected',
+            message: linked.refreshStored
+              ? 'GNB Edge is now receiving your iALERT vehicles. You can close the iALERT tab.'
+              : 'GNB Edge is now receiving your iALERT vehicles. Keep the iALERT tab open to stay connected.',
+          });
+        } catch {
+          // notifications are a convenience only
+        }
+      }
+      return linked;
+    }
+
+    case 'IALERT_TAB_READY': {
+      // An iALERT page loaded: remember its tab so Connect can ask it later.
+      if (sender.id !== chrome.runtime.id || !isIalertSender(sender)) {
+        return { success: false, error: 'Invalid sender' };
+      }
+      await trackIalertTab(sender.tab?.id);
+      return { success: true };
     }
 
     case 'IALERT_TOKEN_ROTATED': {
@@ -356,7 +399,7 @@ async function handleMessage(message, sender) {
 
     case 'IALERT_ENABLE': {
       tlog.info('iALERT connect requested');
-      return openIalertForSignIn();
+      return connectIalert();
     }
 
     case 'IALERT_STATUS': {

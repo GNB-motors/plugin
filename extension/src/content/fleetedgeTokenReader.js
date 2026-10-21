@@ -9,6 +9,7 @@
  */
 
 import { decryptAes192Cbc } from './aes192cbc.js';
+import { showGnbBanner } from './gnbBanner.js';
 
 let interceptedToken = null;
 let interceptedFleetId = null;
@@ -67,8 +68,31 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
     readFleetEdgeToken()
       .then((result) => sendResponse(result))
       .catch((err) => sendResponse({ success: false, error: err.message }));
+    return true; // Keep message channel open for the async response
   }
-  return true; // Keep message channel open for the async response
+  // A link result to show on this page. Only this extension may ask.
+  if (message?.type === 'GNB_BANNER' && message.banner && sender?.id === chrome.runtime.id) {
+    const { banner } = message;
+    showGnbBanner({
+      ...banner,
+      // After a link that stored a refresh token the background clears the
+      // FleetEdge session and closes the tab; the countdown tells it when.
+      onCountdownEnd: banner.closeAfterMs
+        ? () => {
+            try {
+              Promise.resolve(chrome.runtime.sendMessage({ type: 'FLEETEDGE_LINK_DONE' })).catch(
+                () => {}
+              );
+            } catch {
+              // Background worker unavailable; its fallback timer closes the tab.
+            }
+          }
+        : undefined,
+    });
+    sendResponse({ success: true });
+    return false;
+  }
+  return false;
 });
 
 // ─── SPA localStorage decryption ────────────────────────────────────────────
@@ -193,7 +217,10 @@ async function readFleetEdgeToken() {
       fleetId: resolvedFleetId,
       refreshToken: bestRefreshToken,
       exp: payload ? payload.exp : null,
-      foundIn: bestAccessToken === interceptedToken ? 'live_network_intercept' : 'spa_localstorage_decrypted',
+      foundIn:
+        bestAccessToken === interceptedToken
+          ? 'live_network_intercept'
+          : 'spa_localstorage_decrypted',
       decryptError: bestRefreshToken ? null : spa.decryptError,
     };
   }

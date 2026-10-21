@@ -219,35 +219,45 @@ describe('fleetedgeLink - edge cases', () => {
     expect(result.vehicleCount).toBe(15);
   });
 
-  it('clears session and closes tabs after a successful link with a refresh token', async () => {
-    const mod = await setupFleetedgeLink({
-      tabsResult: [{ id: 42 }, { id: 99 }],
-      sendMessageResult: {
-        success: true,
-        token: 'eyJhbGciOiJSUzI1NiJ9.eyJmbGVldF9pZCI6IkYxMjMiLCJleHAiOjk5OTk5OTk5OTl9.sig',
-        refreshToken: 'refresh.jwt.token',
-        fleetId: 'F123',
-        exp: 9999999999,
-        foundIn: 'localStorage:kc-access',
-      },
-      backendFetchResult: { data: { success: true, vehicleCount: 15, expiresAt: 9999999999 } },
-    });
+  const LINK_WITH_REFRESH = {
+    tabsResult: [{ id: 42 }, { id: 99 }],
+    sendMessageResult: {
+      success: true,
+      token: 'eyJhbGciOiJSUzI1NiJ9.eyJmbGVldF9pZCI6IkYxMjMiLCJleHAiOjk5OTk5OTk5OTl9.sig',
+      refreshToken: 'refresh.jwt.token',
+      fleetId: 'F123',
+      exp: 9999999999,
+      foundIn: 'localStorage:kc-access',
+    },
+    backendFetchResult: { data: { success: true, vehicleCount: 15, expiresAt: 9999999999 } },
+  };
+
+  it('after a link with a refresh token: banner on every FleetEdge tab, clear only when the countdown ends', async () => {
+    const mod = await setupFleetedgeLink(LINK_WITH_REFRESH);
     // With multiple tabs open, captureTabToken returns a picker. Re-invoke with a
     // chosen tabId so the single-tab read succeeds and we still exercise closing
     // all FleetEdge tabs (both the active tab and the other open one).
     const picker = await mod.connectFleetEdge();
-    expect(picker.success).toBe(false);
     expect(picker.needsTabPick).toBe(true);
 
     const result = await mod.connectFleetEdge({ tabId: 42 });
     expect(result.success).toBe(true);
-    expect(result.sessionCleared).toBe(true);
+    expect(result.sessionClearing).toBe(true);
+    expect(result.sessionCleared).toBe(false);
+
+    const banners = chrome.tabs.sendMessage.mock.calls.filter(([, m]) => m.type === 'GNB_BANNER');
+    expect(banners.map(([id]) => id)).toEqual([42, 99]);
+    expect(banners[0][1].banner).toMatchObject({ tone: 'ok', closeAfterMs: 5000 });
+    expect(banners[0][1].banner.body).toMatch(/15 vehicles are syncing/);
+    // The user is told first: nothing is cleared or closed yet.
+    expect(chrome.browsingData.remove).not.toHaveBeenCalled();
+    expect(chrome.tabs.remove).not.toHaveBeenCalled();
+
+    const done = await mod.completeFleetEdgeLink();
+    expect(done.sessionCleared).toBe(true);
     expect(chrome.browsingData.remove).toHaveBeenCalledWith(
       {
-        origins: [
-          'https://fleetedge.home.tatamotors',
-          'https://cvpauth.api.tatamotors',
-        ],
+        origins: ['https://fleetedge.home.tatamotors', 'https://cvpauth.api.tatamotors'],
       },
       { cookies: true, localStorage: true }
     );
@@ -255,6 +265,33 @@ describe('fleetedgeLink - edge cases', () => {
       url: 'https://fleetedge.home.tatamotors/*',
     });
     expect(chrome.tabs.remove).toHaveBeenCalledWith([42, 99]);
+
+    // A second "done" (or a stray one) does nothing.
+    const again = await mod.completeFleetEdgeLink();
+    expect(again).toEqual({ sessionCleared: false, skipped: true });
+    expect(chrome.browsingData.remove).toHaveBeenCalledTimes(1);
+  });
+
+  it('clears on the fallback timer when the tab never reports back, exactly once', async () => {
+    vi.useFakeTimers();
+    try {
+      const mod = await setupFleetedgeLink(LINK_WITH_REFRESH);
+      await mod.connectFleetEdge({ tabId: 42 });
+      await vi.advanceTimersByTimeAsync(7999);
+      expect(chrome.browsingData.remove).not.toHaveBeenCalled();
+      await vi.advanceTimersByTimeAsync(1);
+      expect(chrome.browsingData.remove).toHaveBeenCalledTimes(1);
+      await mod.completeFleetEdgeLink();
+      expect(chrome.browsingData.remove).toHaveBeenCalledTimes(1);
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  it('a stray link-done with no link pending clears nothing', async () => {
+    const mod = await setupFleetedgeLink(LINK_WITH_REFRESH);
+    expect(await mod.completeFleetEdgeLink()).toEqual({ sessionCleared: false, skipped: true });
+    expect(chrome.browsingData.remove).not.toHaveBeenCalled();
   });
 
   it('does not clear session when the link fails', async () => {
@@ -291,8 +328,16 @@ describe('fleetedgeLink - edge cases', () => {
     const result = await mod.connectFleetEdge();
     expect(result.success).toBe(true);
     expect(result.sessionCleared).toBe(false);
+    expect(result.sessionClearing).toBe(false);
     expect(chrome.browsingData.remove).not.toHaveBeenCalled();
     expect(chrome.tabs.remove).not.toHaveBeenCalled();
+    const banner = chrome.tabs.sendMessage.mock.calls.find(([, m]) => m.type === 'GNB_BANNER');
+    expect(banner[1].banner).toMatchObject({
+      tone: 'warn',
+      title: "Connected, but it can't renew itself",
+    });
+    expect(banner[1].banner.closeAfterMs).toBeUndefined();
+    expect(await mod.completeFleetEdgeLink()).toEqual({ sessionCleared: false, skipped: true });
   });
 
   it('still succeeds when browsingData.remove throws', async () => {
@@ -311,7 +356,8 @@ describe('fleetedgeLink - edge cases', () => {
     });
     const result = await mod.connectFleetEdge();
     expect(result.success).toBe(true);
-    expect(result.sessionCleared).toBe(false);
+    const done = await mod.completeFleetEdgeLink();
+    expect(done.sessionCleared).toBe(false);
     expect(chrome.tabs.remove).not.toHaveBeenCalled();
   });
 

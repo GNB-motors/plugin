@@ -7,6 +7,13 @@
  * Keeps the freshest session by comparing the 10-digit epoch prefix of tokenValue.
  */
 
+import { showGnbBanner } from './gnbBanner.js';
+import {
+  ialertConnectingBanner,
+  ialertLinkedBanner,
+  ialertFailureBanner,
+} from '../shared/linkBanners.js';
+
 const IALERT_ORIGIN = 'https://ialert.ashokleyland.com';
 
 // Store the freshest session (keyed by tokenValue epoch prefix)
@@ -49,15 +56,7 @@ window.addEventListener('message', (event) => {
         ialertOwnerId: event.data.ialertOwnerId,
       };
 
-      // Forward to background
-      try {
-        chrome.runtime.sendMessage({
-          type: 'IALERT_SESSION_CAPTURED',
-          session: cachedSession,
-        });
-      } catch {
-        // Background worker unavailable
-      }
+      forwardSession(cachedSession);
     }
     return;
   }
@@ -83,10 +82,43 @@ window.addEventListener('message', (event) => {
   }
 });
 
+/**
+ * Link the captured session and tell the user, on this page, how it went.
+ * The background answers with linkIalertSession()'s result (never a token).
+ */
+async function forwardSession(session) {
+  showGnbBanner(ialertConnectingBanner());
+  let result;
+  try {
+    result = await chrome.runtime.sendMessage({ type: 'IALERT_SESSION_CAPTURED', session });
+  } catch (err) {
+    result = { success: false, error: err?.message || 'GNB Edge is not responding' };
+  }
+  if (result?.success) showGnbBanner(ialertLinkedBanner(result));
+  else showGnbBanner(ialertFailureBanner(result));
+}
+
 // Listen for requests from the extension background script
 chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
-  // Only the extension itself may ask, and only this one question.
-  if (sender.id !== chrome.runtime.id || message?.type !== 'READ_IALERT_SESSION') return false;
-  sendResponse({ success: true, session: cachedSession });
-  return false; // answered synchronously
+  // Only the extension itself may ask.
+  if (sender.id !== chrome.runtime.id) return false;
+  if (message?.type === 'READ_IALERT_SESSION') {
+    sendResponse({ success: true, session: cachedSession });
+    return false; // answered synchronously
+  }
+  if (message?.type === 'GNB_BANNER' && message.banner) {
+    showGnbBanner(message.banner);
+    sendResponse({ success: true });
+    return false;
+  }
+  return false;
 });
+
+// Tell the background this tab can be asked for a session. The popup's
+// Connect button uses this (the extension has no permission to list iALERT
+// tabs by URL). Tab ids only; no session data.
+try {
+  Promise.resolve(chrome.runtime.sendMessage({ type: 'IALERT_TAB_READY' })).catch(() => {});
+} catch {
+  // Background worker unavailable
+}

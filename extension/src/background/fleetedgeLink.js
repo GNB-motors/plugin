@@ -12,6 +12,11 @@ import { createLogger } from './logger.js';
 import { getStorage, setStorage, checkTokenExpiry, deriveAccountStatus } from './utils.js';
 import { backendFetch } from './backendApi.js';
 import { createLayerLogger, LAYERS } from './telemetry.js';
+import {
+  fleetEdgeLinkedBanner,
+  fleetEdgeNoRenewBanner,
+  FLEETEDGE_CLOSE_AFTER_MS,
+} from '../shared/linkBanners.js';
 
 const logger = createLogger('FleetEdgeLink');
 const tokenTel = createLayerLogger(LAYERS.TOKEN);
@@ -225,7 +230,11 @@ async function captureTabToken({ targetTabId = null, expectedFleetId = null } = 
           if (res && res.success) {
             const payload = decodeJwtPayloadUnsafe(res.token);
             const name = payload?.name || payload?.sub || null;
-            return { tabId: t.id, fleetId: res.fleetId || null, displayName: name || res.fleetId || `Tab ${t.id}` };
+            return {
+              tabId: t.id,
+              fleetId: res.fleetId || null,
+              displayName: name || res.fleetId || `Tab ${t.id}`,
+            };
           }
         } catch {
           /* tab not ready — include as unknown */
@@ -338,6 +347,59 @@ async function clearFleetEdgeSessionAndCloseTabs() {
   return { sessionCleared };
 }
 
+// ── after a link: tell the user on the FleetEdge tab, then close it ───────────
+// The tab shows "connected, closing in 5 s"; when its countdown ends it sends
+// FLEETEDGE_LINK_DONE and we clear + close. The timer is only a fallback (MV3
+// may stop the worker before it fires — the banner path is the primary one).
+const CLEAR_FALLBACK_MS = FLEETEDGE_CLOSE_AFTER_MS + 3000;
+let pendingFleetEdgeClear = null; // { timer } while a clear is owed
+
+async function bannerOnFleetEdgeTabs(banner) {
+  try {
+    const tabs = await chrome.tabs.query({ url: FLEETEDGE_WILDCARD });
+    await Promise.all(
+      tabs
+        .filter((t) => t.id != null)
+        .map((t) => chrome.tabs.sendMessage(t.id, { type: 'GNB_BANNER', banner }).catch(() => {}))
+    );
+  } catch {
+    // best effort: the popup still reports the outcome
+  }
+}
+
+function notify(id, title, message) {
+  try {
+    chrome.notifications?.create(id, {
+      type: 'basic',
+      iconUrl: 'icons/icon48.png',
+      title,
+      message,
+    });
+  } catch {
+    // notifications are a convenience only
+  }
+}
+
+function scheduleFleetEdgeClear() {
+  if (pendingFleetEdgeClear) clearTimeout(pendingFleetEdgeClear.timer);
+  pendingFleetEdgeClear = {
+    timer: setTimeout(() => {
+      completeFleetEdgeLink().catch(() => {});
+    }, CLEAR_FALLBACK_MS),
+  };
+}
+
+/**
+ * Clear the FleetEdge session and close its tabs — only when a link just
+ * asked for it. A stray FLEETEDGE_LINK_DONE with nothing pending does nothing.
+ */
+export async function completeFleetEdgeLink() {
+  if (!pendingFleetEdgeClear) return { sessionCleared: false, skipped: true };
+  clearTimeout(pendingFleetEdgeClear.timer);
+  pendingFleetEdgeClear = null;
+  return clearFleetEdgeSessionAndCloseTabs();
+}
+
 // ── public API ────────────────────────────────────────────────────────────────
 
 /**
@@ -348,7 +410,11 @@ export async function connectFleetEdge(opts = {}) {
   return withLinkLock(() => _connectFleetEdgeInner(opts));
 }
 
-async function _connectFleetEdgeInner({ expectedFleetId = null, expectedAccountId = null, tabId = null } = {}) {
+async function _connectFleetEdgeInner({
+  expectedFleetId = null,
+  expectedAccountId = null,
+  tabId = null,
+} = {}) {
   logger.info('Connecting to FleetEdge...');
   feTel.perfStart('connect');
 
@@ -424,19 +490,25 @@ async function _connectFleetEdgeInner({ expectedFleetId = null, expectedAccountI
 
     // Only clear the browser session if we captured a refresh token. No refresh
     // token means nothing to protect from SPA rotation; don't log the user out.
-    let sessionCleared = false;
+    let sessionClearing = false;
     // The backend may refuse a captured refresh token (it belongs to a DIFFERENT
     // FleetEdge user than the account being linked — one browser session used to
     // link several accounts — or it is already expired). Such a link cannot
     // renew either, so it is treated exactly like "none captured": warn, and do
     // not sign the browser out (2026-10-07: BD died 48 h after such a link).
     const refreshRejected = result && result.refreshRejected ? result.refreshRejected : null;
-    const noRefreshToken =
-      !captured.refreshToken || (result && result.refreshStored === false);
+    const noRefreshToken = !captured.refreshToken || (result && result.refreshStored === false);
     if (!noRefreshToken) {
-      const clearResult = await clearFleetEdgeSessionAndCloseTabs();
-      sessionCleared = clearResult.sessionCleared;
+      await bannerOnFleetEdgeTabs(fleetEdgeLinkedBanner(result?.vehicleCount));
+      scheduleFleetEdgeClear();
+      sessionClearing = true;
+      notify(
+        'gnb-fe-linked',
+        'FleetEdge connected',
+        `${Number(result?.vehicleCount) || 0} vehicles syncing to GNB Edge. You can close FleetEdge.`
+      );
     } else {
+      await bannerOnFleetEdgeTabs(fleetEdgeNoRenewBanner());
       // A link that stores no refresh token looks identical to a good one in the
       // UI and dies silently when the 48h access token lapses. Say so, loudly.
       feTel.warn('FleetEdge linked WITHOUT a refresh token — account cannot self-renew', {
@@ -459,7 +531,9 @@ async function _connectFleetEdgeInner({ expectedFleetId = null, expectedAccountI
       vehicleCount: result.vehicleCount,
       expiresAt: result.expiresAt,
       accounts: status.accounts || [],
-      sessionCleared,
+      // The clear now happens a few seconds later (see completeFleetEdgeLink).
+      sessionCleared: false,
+      sessionClearing,
       noRefreshToken,
       refreshRejected,
     };
@@ -486,9 +560,10 @@ export async function pushRotatedRefreshToken(fleetId, refreshToken) {
   let resolvedFleetId = fleetId || null;
   if (!resolvedFleetId) {
     const payload = decodeJwtPayloadUnsafe(refreshToken);
-    resolvedFleetId = payload && (payload.fleet_id || payload.fleetId)
-      ? String(payload.fleet_id || payload.fleetId)
-      : null;
+    resolvedFleetId =
+      payload && (payload.fleet_id || payload.fleetId)
+        ? String(payload.fleet_id || payload.fleetId)
+        : null;
   }
 
   if (!resolvedFleetId) {
@@ -560,7 +635,7 @@ export async function disconnectFleetEdgeAccount(accountId) {
       // "disconnect one" revoked every link (prod BD 2026-10-09). All = explicit.
       await backendFetch(
         accountId ? `/fleetedge/unlink/${encodeURIComponent(accountId)}` : '/fleetedge/unlink',
-        { method: 'POST', body: accountId ? undefined : JSON.stringify({ all: true }) },
+        { method: 'POST', body: accountId ? undefined : JSON.stringify({ all: true }) }
       );
     } catch (err) {
       logger.warn('Unlink API call failed:', err.message);

@@ -137,6 +137,12 @@
   flex-direction: column;
   gap: 12px;
 }
+/* Cards scrolling under the footer fade out instead of being cut off. The
+   fade sits inside the bottom padding, so nothing is hidden at rest. */
+.gnb-body {
+  -webkit-mask-image: linear-gradient(to bottom, #000 calc(100% - 16px), transparent);
+  mask-image: linear-gradient(to bottom, #000 calc(100% - 16px), transparent);
+}
 .gnb-body::-webkit-scrollbar {
   width: 8px;
 }
@@ -216,6 +222,17 @@
 .prov-empty p {
   margin: 0 0 10px;
   color: var(--text-2);
+}
+.prov-actions {
+  display: grid;
+  grid-template-columns: 1fr 1.4fr;
+  gap: 8px;
+}
+.prov-empty .prov-hint {
+  margin: 10px 0 0;
+  text-align: center;
+  font-size: 12px;
+  color: var(--text-3);
 }
 .prov-steps {
   margin: 0 0 12px;
@@ -743,14 +760,35 @@
   font-variant-numeric: tabular-nums;
 }
 .logs-empty {
-  padding: 40px 24px;
+  height: 100%;
+  min-height: 240px;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 4px;
+  padding: 24px;
   text-align: center;
   color: var(--text-3);
 }
+.logs-empty-icon {
+  width: 40px;
+  height: 40px;
+  margin-bottom: 8px;
+  border-radius: 50%;
+  display: grid;
+  place-items: center;
+  background: var(--sunk);
+  color: var(--text-3);
+}
 .logs-empty strong {
-  display: block;
   color: var(--text);
-  margin-bottom: 4px;
+  font-size: 14px;
+}
+/* The log view is one panel: no gap (it showed as a grey band) and no page tint. */
+.view-wrapper--logs {
+  gap: 0;
+  background: var(--panel);
 }
 
 /* ─── splash ─────────────────────────────────────────────────────────── */
@@ -864,8 +902,12 @@
 }
 
 @keyframes fade-in {
-  from { opacity: 0; }
-  to { opacity: 1; }
+  from {
+    opacity: 0;
+  }
+  to {
+    opacity: 1;
+  }
 }
 
 /* Open: cards in view-wrapper fade in and rise */
@@ -907,8 +949,13 @@
 }
 
 @keyframes breathe {
-  0%, 100% { opacity: 1; }
-  50% { opacity: 0.45; }
+  0%,
+  100% {
+    opacity: 1;
+  }
+  50% {
+    opacity: 0.45;
+  }
 }
 
 /* Syncing: progress bar on busy cards */
@@ -918,7 +965,7 @@
 }
 
 .prov--busy::after {
-  content: '';
+  content: "";
   position: absolute;
   top: 0;
   left: 0;
@@ -936,8 +983,12 @@
 }
 
 @keyframes slide-bar {
-  0% { background-position: 200% 0; }
-  100% { background-position: -200% 0; }
+  0% {
+    background-position: 200% 0;
+  }
+  100% {
+    background-position: -200% 0;
+  }
 }
 
 /* Rows: mount fade in staggered */
@@ -1104,11 +1155,22 @@
 }
 
 @keyframes shake {
-  0%, 100% { transform: translateX(0); }
-  20% { transform: translateX(-6px); }
-  40% { transform: translateX(6px); }
-  60% { transform: translateX(-4px); }
-  80% { transform: translateX(4px); }
+  0%,
+  100% {
+    transform: translateX(0);
+  }
+  20% {
+    transform: translateX(-6px);
+  }
+  40% {
+    transform: translateX(6px);
+  }
+  60% {
+    transform: translateX(-4px);
+  }
+  80% {
+    transform: translateX(4px);
+  }
 }
 
 .notice-actions {

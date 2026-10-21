@@ -1030,17 +1030,19 @@ describe('index.js — v2 improvements (handleMessage logic)', () => {
         setBadgeBackgroundColor: vi.fn(),
       },
       runtime: {
+        id: 'ext-id',
         onMessage: { addListener: vi.fn() },
         onMessageExternal: { addListener: vi.fn() },
         onInstalled: { addListener: vi.fn() },
         getManifest: vi.fn(() => ({ version: '2.0.0' })),
       },
-      tabs: { query: vi.fn(() => Promise.resolve([])), sendMessage: vi.fn() },
+      tabs: { query: vi.fn(() => Promise.resolve([])), sendMessage: vi.fn(), onRemoved: { addListener: vi.fn() } },
       notifications: { create: vi.fn() },
     });
 
     const getFleetEdgeStatusSpy = vi.fn(() => Promise.resolve(feStatusResult));
     const connectFleetEdgeSpy = vi.fn(() => Promise.resolve(connectResult));
+    const completeFleetEdgeLinkSpy = vi.fn(() => Promise.resolve({ sessionCleared: true }));
     const disconnectFleetEdgeSpy = vi.fn(() => Promise.resolve(disconnectResult));
 
     vi.doMock('../fleetedgeLink.js', () => ({
@@ -1052,6 +1054,7 @@ describe('index.js — v2 improvements (handleMessage logic)', () => {
       renameFleetEdgeAccount: vi.fn(() => Promise.resolve({ success: true })),
       resetNotifiedAccounts: vi.fn(),
       withLinkLock: vi.fn((fn) => fn()),
+      completeFleetEdgeLink: completeFleetEdgeLinkSpy,
     }));
 
     vi.doMock('../logger.js', () => ({
@@ -1139,10 +1142,10 @@ describe('index.js — v2 improvements (handleMessage logic)', () => {
     const messageHandler = chrome.runtime.onMessage.addListener.mock.calls[0]?.[0];
 
     // Helper to call a message and get the response
-    async function sendMessage(message) {
+    async function sendMessage(message, sender = {}) {
       return new Promise((resolve) => {
         const sendResponse = (response) => resolve(response);
-        const result = messageHandler(message, {}, sendResponse);
+        const result = messageHandler(message, sender, sendResponse);
         // If returns false, no async — resolve immediately
         if (result === false) resolve(undefined);
       });
@@ -1160,10 +1163,41 @@ describe('index.js — v2 improvements (handleMessage logic)', () => {
         getFleetEdgeStatus: getFleetEdgeStatusSpy,
         connectFleetEdge: connectFleetEdgeSpy,
         disconnectFleetEdge: disconnectFleetEdgeSpy,
+        completeFleetEdgeLink: completeFleetEdgeLinkSpy,
       },
       actionCalls,
     };
   }
+
+  // ── content-script messages: only this extension, only the right site ──────
+
+  it('FLEETEDGE_LINK_DONE closes FleetEdge only for this extension on the FleetEdge origin', async () => {
+    const { sendMessage, spies } = await setupIndex();
+    const fe = 'https://fleetedge.home.tatamotors/dashboard';
+    const done = { type: 'FLEETEDGE_LINK_DONE' };
+    expect(await sendMessage(done, { id: 'other', url: fe })).toMatchObject({ success: false });
+    expect(
+      await sendMessage(done, { id: 'ext-id', url: 'https://fleetedge.home.tatamotors.evil.example/' })
+    ).toMatchObject({ success: false });
+    expect(
+      await sendMessage(done, { id: 'ext-id', url: 'https://ialert.ashokleyland.com/' })
+    ).toMatchObject({ success: false });
+    expect(spies.completeFleetEdgeLink).not.toHaveBeenCalled();
+    expect(await sendMessage(done, { id: 'ext-id', url: fe })).toEqual({ sessionCleared: true });
+    expect(spies.completeFleetEdgeLink).toHaveBeenCalledTimes(1);
+  });
+
+  it('IALERT_TAB_READY is accepted only from this extension on the iALERT origin', async () => {
+    const { sendMessage } = await setupIndex();
+    const ready = { type: 'IALERT_TAB_READY' };
+    const tab = { id: 5 };
+    const ia = 'https://ialert.ashokleyland.com/x';
+    expect(
+      await sendMessage(ready, { id: 'ext-id', url: 'https://ialert.ashokleyland.com.evil.example/', tab })
+    ).toMatchObject({ success: false });
+    expect(await sendMessage(ready, { id: 'other', url: ia, tab })).toMatchObject({ success: false });
+    expect(await sendMessage(ready, { id: 'ext-id', url: ia, tab })).toEqual({ success: true });
+  });
 
   // ── URL validation ──────────────────────────────────────────────────────────
 
@@ -1463,7 +1497,7 @@ describe('index.js — v2 improvements (handleMessage logic)', () => {
         onInstalled: { addListener: vi.fn() },
         getManifest: vi.fn(() => ({ version: '2.0.0' })),
       },
-      tabs: { query: vi.fn(() => Promise.resolve([])), sendMessage: vi.fn() },
+      tabs: { query: vi.fn(() => Promise.resolve([])), sendMessage: vi.fn(), onRemoved: { addListener: vi.fn() } },
       notifications: { create: vi.fn() },
     });
 
