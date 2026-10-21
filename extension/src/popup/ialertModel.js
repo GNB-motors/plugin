@@ -88,7 +88,10 @@ export function describeConnectResult(res) {
     case 'LINKED':
       return res.refreshStored
         ? { text: 'iALERT connected ✓ You can close the iALERT tab.', kind: 'ok' }
-        : { text: 'iALERT connected ✓ Keep the iALERT tab open to stay connected.', kind: 'ok' };
+        : {
+            text: "iALERT connected ✓ It can't renew itself yet: sign in again when it shows Reconnect needed.",
+            kind: 'ok',
+          };
     case 'WAITING':
       return res.tab === 'focused'
         ? { text: 'Sign in on your iALERT tab. GNB Edge connects as soon as you do.', kind: '' }

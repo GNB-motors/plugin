@@ -364,7 +364,7 @@ async function handleMessage(message, sender) {
             title: 'iALERT connected',
             message: linked.refreshStored
               ? 'GNB Edge is now receiving your iALERT vehicles. You can close the iALERT tab.'
-              : 'GNB Edge is now receiving your iALERT vehicles. Keep the iALERT tab open to stay connected.',
+              : 'GNB Edge is now receiving your iALERT vehicles. When the extension shows Reconnect needed, sign in to iALERT again.',
           });
         } catch {
           // notifications are a convenience only

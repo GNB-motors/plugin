@@ -32,12 +32,13 @@ export function ialertLinkedBanner(result) {
       autoHideMs: 15000,
     };
   }
-  // Without a stored refresh token the backend cannot renew the session on its
-  // own: the open iALERT tab renews it and GNB Edge forwards each renewal.
+  // Without a stored refresh token nothing is known to renew the session: on
+  // 21 Oct the first prod link lapsed at its first expiry (~15 min). Promise
+  // only what has been seen to work.
   return {
     tone: 'ok',
     title: 'iALERT is connected to GNB Edge',
-    body: 'Your vehicles appear in GNB within a few minutes. Keep this iALERT tab open: while it is open, GNB Edge keeps the connection renewed.',
+    body: "Your vehicles appear in GNB within a few minutes. This sign-in can't renew itself yet: when GNB Edge shows Reconnect needed, sign in to iALERT again.",
     autoHideMs: 20000,
   };
 }
