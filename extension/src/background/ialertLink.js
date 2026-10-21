@@ -3,7 +3,7 @@
  * ────────────────────────────────
  * Coordinates:
  *   1. Opens iALERT for sign-in (capture scripts are manifest-declared)
- *   2. Links captured session to backend (POST /extension/ialert/link-token)
+ *   2. Links captured session to backend (POST /api/extension/ialert/link-token)
  *   3. Forwards token rotations to backend
  *   4. Manages iALERT account status
  */
@@ -71,7 +71,7 @@ export async function linkIalertSession(session) {
   return withLinkLock(async () => {
     try {
       ialertTel.info('Linking iALERT session to backend');
-      const response = await backendFetch('/extension/ialert/link-token', {
+      const response = await backendFetch('/ialert/link-token', {
         method: 'POST',
         body: JSON.stringify({
           token,
@@ -139,7 +139,7 @@ export async function forwardIalertRotation(rotation) {
   }
 
   try {
-    await backendFetch('/extension/ialert/refresh-token-rotated', {
+    await backendFetch('/ialert/refresh-token-rotated', {
       method: 'POST',
       body: JSON.stringify({
         token,
@@ -164,9 +164,9 @@ export async function forwardIalertRotation(rotation) {
 export async function refreshIalertStatus() {
   return withLinkLock(async () => {
     try {
-      const response = await backendFetch('/extension/ialert/status');
+      const response = await backendFetch('/ialert/status');
       const data = await response.json();
-      // GET /extension/ialert/status → { status, data: [row, …] } (backend B4
+      // GET /api/extension/ialert/status → { status, data: [row, …] } (backend B4
       // getStatus returns the rows array; rows carry no tokens).
       const accounts = Array.isArray(data?.data) ? data.data : [];
 
@@ -195,9 +195,7 @@ export async function refreshIalertStatus() {
 export async function unlinkIalert(accountId) {
   return withLinkLock(async () => {
     try {
-      const path = accountId
-        ? `/extension/ialert/unlink/${encodeURIComponent(accountId)}`
-        : '/extension/ialert/unlink';
+      const path = accountId ? `/ialert/unlink/${encodeURIComponent(accountId)}` : '/ialert/unlink';
 
       await backendFetch(path, {
         method: 'POST',

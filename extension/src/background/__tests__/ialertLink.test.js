@@ -87,7 +87,7 @@ describe('ialertLink', () => {
     it('POST body contains exactly 5 keys: token, refreshToken, tokenValue, ialertUserId, ialertOwnerId', async () => {
       let capturedBody = null;
       fetchMock = vi.fn((url, opts) => {
-        if (url.includes('/extension/ialert/link-token')) {
+        if (url.endsWith('/api/extension/ialert/link-token')) {
           capturedBody = JSON.parse(opts.body);
         }
         return Promise.resolve({
@@ -175,7 +175,12 @@ describe('ialertLink', () => {
           status: 400,
           headers: { get: () => null },
           json: () =>
-            Promise.resolve({ status: 'error', statusCode: 400, code: 'IALERT_TOKEN_TOO_OLD', message: TOO_OLD }),
+            Promise.resolve({
+              status: 'error',
+              statusCode: 400,
+              code: 'IALERT_TOKEN_TOO_OLD',
+              message: TOO_OLD,
+            }),
         })
       );
       const { mod } = await setupIalertLink();
@@ -192,7 +197,10 @@ describe('ialertLink', () => {
     it('status rows arrive as the data array and are stored without tokens', async () => {
       const rows = [{ accountId: 'a1', externalAccountId: '410001', status: 'ACTIVE' }];
       fetchMock = vi.fn(() =>
-        Promise.resolve({ ok: true, json: () => Promise.resolve({ status: 'success', data: rows }) })
+        Promise.resolve({
+          ok: true,
+          json: () => Promise.resolve({ status: 'success', data: rows }),
+        })
       );
       const { mod } = await setupIalertLink();
       const result = await mod.refreshIalertStatus();
@@ -201,23 +209,81 @@ describe('ialertLink', () => {
     });
 
     it('a rotation is forwarded with the stored tokenValue and user id', async () => {
-      store.ialertMeta = { tokenValue: '179226993000200002', ialertUserId: '200002', ialertOwnerId: '200002' };
+      store.ialertMeta = {
+        tokenValue: '179226993000200002',
+        ialertUserId: '200002',
+        ialertOwnerId: '200002',
+      };
       let body = null;
       let url = null;
       fetchMock = vi.fn((u, opts) => {
         url = u;
         body = JSON.parse(opts.body);
-        return Promise.resolve({ ok: true, json: () => Promise.resolve({ status: 'success', data: {} }) });
+        return Promise.resolve({
+          ok: true,
+          json: () => Promise.resolve({ status: 'success', data: {} }),
+        });
       });
       const { mod } = await setupIalertLink();
       await mod.forwardIalertRotation({ token: 'NEW-A', refreshToken: 'NEW-R' });
-      expect(url).toContain('/extension/ialert/refresh-token-rotated');
+      expect(url).toBe('http://localhost:3000/api/extension/ialert/refresh-token-rotated');
       expect(body).toEqual({
         token: 'NEW-A',
         refreshToken: 'NEW-R',
         tokenValue: '179226993000200002',
         ialertUserId: '200002',
       });
+    });
+  });
+
+  // backendFetch already prefixes API_PREFIX (/api/extension), so callers pass
+  // the path BELOW it. A doubled /extension 404s on the live server, and the
+  // popup reads that 404 as "Your GNB server doesn't support iALERT yet".
+  describe('request URLs match the backend routes exactly', () => {
+    const BASE = 'http://localhost:3000/api/extension';
+    const ok = () =>
+      Promise.resolve({ ok: true, json: () => Promise.resolve({ status: 'success', data: [] }) });
+    const paths = () =>
+      fetchMock.mock.calls.map(([u, opts]) => [opts?.method || 'GET', u.split('?')[0]]);
+
+    it('link-token', async () => {
+      fetchMock = vi.fn(() =>
+        Promise.resolve({ ok: true, json: () => Promise.resolve({ data: { accountId: 'a1' } }) })
+      );
+      const { mod } = await setupIalertLink();
+      await mod.linkIalertSession({
+        token: 't',
+        tokenValue: '179226993000200002',
+        ialertUserId: '200002',
+        ialertOwnerId: '410001',
+      });
+      expect(paths()).toEqual([['POST', `${BASE}/ialert/link-token`]]);
+    });
+
+    it('refresh-token-rotated', async () => {
+      store.ialertMeta = { tokenValue: '179226993000200002', ialertUserId: '200002' };
+      fetchMock = vi.fn(ok);
+      const { mod } = await setupIalertLink();
+      await mod.forwardIalertRotation({ token: 'A', refreshToken: 'R' });
+      expect(paths()).toEqual([['POST', `${BASE}/ialert/refresh-token-rotated`]]);
+    });
+
+    it('status', async () => {
+      fetchMock = vi.fn(ok);
+      const { mod } = await setupIalertLink();
+      await mod.refreshIalertStatus();
+      expect(paths()).toEqual([['GET', `${BASE}/ialert/status`]]);
+    });
+
+    it('unlink one and unlink all', async () => {
+      fetchMock = vi.fn(ok);
+      const { mod } = await setupIalertLink();
+      await mod.unlinkIalert('0123456789abcdef01234567');
+      await mod.unlinkIalert(null);
+      expect(paths()).toEqual([
+        ['POST', `${BASE}/ialert/unlink/0123456789abcdef01234567`],
+        ['POST', `${BASE}/ialert/unlink`],
+      ]);
     });
   });
 
