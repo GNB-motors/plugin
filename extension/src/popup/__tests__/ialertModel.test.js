@@ -104,7 +104,7 @@ describe('describeConnectResult (Connect iALERT button)', () => {
     });
     expect(
       describeConnectResult({ success: true, state: 'LINKED', refreshStored: false }).text
-    ).toMatch(/Keep the iALERT tab open/);
+    ).toMatch(/can't renew itself yet/);
   });
 
   it('waiting: an existing tab vs a newly opened one', async () => {

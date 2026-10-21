@@ -192,11 +192,11 @@ describe('ialertSessionReader (real module)', () => {
     expect(pings).toEqual([{ type: 'IALERT_TAB_READY' }]);
   });
 
-  it('shows "connecting" then "connected, keep this tab open" when no refresh token was stored', async () => {
+  it('shows "connecting" then "connected, cannot renew itself yet" when no refresh token was stored', async () => {
     onWindowMessage({ source: window, origin: ORIGIN, data: session('1792285412001') });
     await flush();
     expect(banners.map((b) => b.tone)).toEqual(['progress', 'ok']);
-    expect(banners[1].body).toMatch(/Keep this iALERT tab open/);
+    expect(banners[1].body).toMatch(/can't renew itself yet/);
   });
 
   it('says the tab can be closed when the backend stored a refresh token', async () => {
