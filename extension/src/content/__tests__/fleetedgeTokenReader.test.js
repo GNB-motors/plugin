@@ -25,15 +25,13 @@ const READER_SRC =
   '\n' +
   fs
     .readFileSync(path.join(__dirname, '..', 'fleetedgeTokenReader.js'), 'utf8')
-    .replace(/^import\s+\{[^}]*\}\s+from\s+'\.\/aes192cbc\.js';\s*$/gm, '');
+    // aes192cbc is inlined above; gnbBanner (DOM) is replaced by a sandbox stub.
+    .replace(/^import\s+\{[^}]*\}\s+from\s+'\.\/(aes192cbc|gnbBanner)\.js';\s*$/gm, '');
 
 const ORIGIN = 'https://fleetedge.home.tatamotors';
 
 function b64url(str) {
-  return btoa(str)
-    .replace(/\+/g, '-')
-    .replace(/\//g, '_')
-    .replace(/=+$/, '');
+  return btoa(str).replace(/\+/g, '-').replace(/\//g, '_').replace(/=+$/, '');
 }
 function makeJwt(payload) {
   const enc = (o) => b64url(JSON.stringify(o));
@@ -63,11 +61,14 @@ function buildReader() {
     sessionStorage: { length: 0, key: () => null, getItem: () => null },
   };
   sandbox.window = fakeWindow;
+  sandbox.showGnbBanner = vi.fn();
+  sandbox.Promise = Promise;
   // `window.addEventListener` is referenced via bare `window` in the source,
   // but the script also uses bare `window.addEventListener` at top level via
   // `window.addEventListener(...)`. The IIFE uses `window` as a global.
   sandbox.chrome = {
     runtime: {
+      id: 'ext-id',
       onMessage: {
         addListener: (fn) => {
           runtimeMessageHandler = fn;
@@ -88,18 +89,50 @@ function buildReader() {
 
   function readToken() {
     return new Promise((resolve, reject) => {
-      const ret = runtimeMessageHandler(
-        { type: 'READ_FLEETEDGE_TOKEN' },
-        {},
-        (r) => resolve(r)
-      );
+      const ret = runtimeMessageHandler({ type: 'READ_FLEETEDGE_TOKEN' }, {}, (r) => resolve(r));
       // Handler returns true and responds asynchronously via sendResponse.
       if (ret !== true) reject(new Error('handler did not keep the channel open'));
     });
   }
 
-  return { sandbox, dispatch, readToken };
+  function message(msg, sender) {
+    let answer;
+    const ret = runtimeMessageHandler(msg, sender, (r) => (answer = r));
+    return { ret, answer };
+  }
+
+  return { sandbox, dispatch, readToken, message };
 }
+
+describe('fleetedgeTokenReader — GNB_BANNER', () => {
+  const banner = { tone: 'ok', title: 'FleetEdge is connected to GNB Edge', closeAfterMs: 5000 };
+
+  it('shows a banner asked for by this extension and reports the countdown end', () => {
+    const r = buildReader();
+    const { answer } = r.message({ type: 'GNB_BANNER', banner }, { id: 'ext-id' });
+    expect(answer).toEqual({ success: true });
+    expect(r.sandbox.showGnbBanner).toHaveBeenCalledTimes(1);
+    const shown = r.sandbox.showGnbBanner.mock.calls[0][0];
+    expect(shown.title).toBe(banner.title);
+    shown.onCountdownEnd();
+    expect(r.sandbox.chrome.runtime.sendMessage).toHaveBeenCalledWith({
+      type: 'FLEETEDGE_LINK_DONE',
+    });
+  });
+
+  it('has no countdown callback for a banner without closeAfterMs', () => {
+    const r = buildReader();
+    r.message({ type: 'GNB_BANNER', banner: { tone: 'warn', title: 'x' } }, { id: 'ext-id' });
+    expect(r.sandbox.showGnbBanner.mock.calls[0][0].onCountdownEnd).toBeUndefined();
+  });
+
+  it('ignores a banner from another extension or a page', () => {
+    const r = buildReader();
+    r.message({ type: 'GNB_BANNER', banner }, { id: 'other-ext' });
+    r.message({ type: 'GNB_BANNER', banner }, {});
+    expect(r.sandbox.showGnbBanner).not.toHaveBeenCalled();
+  });
+});
 
 describe('fleetedgeTokenReader message listener (audit H-1)', () => {
   let r;
@@ -212,7 +245,11 @@ describe('fleetedgeTokenReader refresh-token intercept', () => {
     r.dispatch({
       source: r.sandbox.window,
       origin: ORIGIN,
-      data: { type: 'FLEETEDGE_REFRESH_INTERCEPT', refreshToken: 'rt-rotated', fleetId: 'FLEET-OK' },
+      data: {
+        type: 'FLEETEDGE_REFRESH_INTERCEPT',
+        refreshToken: 'rt-rotated',
+        fleetId: 'FLEET-OK',
+      },
     });
     expect(r.sandbox.chrome.runtime.sendMessage).toHaveBeenCalledWith({
       type: 'FLEETEDGE_REFRESH_ROTATED',
@@ -278,7 +315,10 @@ describe('fleetedgeTokenReader SPA localStorage decryption', () => {
     // to the network spy, which only sees a refresh token when the SPA happens
     // to call the refresh endpoint: fine on a long-lived tab, silently empty on
     // a fresh login. Simulate the refusal and require the JS fallback to cover.
-    const access = makeJwt({ exp: Math.floor(Date.now() / 1000) + 3600, fleet_id: 'FLEET-CHROMIUM' });
+    const access = makeJwt({
+      exp: Math.floor(Date.now() / 1000) + 3600,
+      fleet_id: 'FLEET-CHROMIUM',
+    });
     const refresh = makeJwt({ exp: Math.floor(Date.now() / 1000) + 86400 });
     const store = {
       token: await spaEncrypt(access),

@@ -76,3 +76,32 @@ export function describeIalertProblem(status, message) {
   }
   return m || 'Something went wrong. Press Retry.';
 }
+
+/**
+ * One sentence for the result of the popup's Connect iALERT (background connectIalert()).
+ * @param {{ success?: boolean, state?: string, tab?: string, error?: string,
+ *           refreshStored?: boolean } | null | undefined} res
+ * @returns {{ text: string, kind: 'ok'|'err'|'' }}
+ */
+export function describeConnectResult(res) {
+  switch (res?.state) {
+    case 'LINKED':
+      return res.refreshStored
+        ? { text: 'iALERT connected ✓ You can close the iALERT tab.', kind: 'ok' }
+        : { text: 'iALERT connected ✓ Keep the iALERT tab open to stay connected.', kind: 'ok' };
+    case 'WAITING':
+      return res.tab === 'focused'
+        ? { text: 'Sign in on your iALERT tab. GNB Edge connects as soon as you do.', kind: '' }
+        : { text: 'iALERT is open. Sign in there and GNB Edge connects by itself.', kind: '' };
+    case 'SIGN_IN_AGAIN':
+      return {
+        text: 'That iALERT sign-in is too old. Sign out of iALERT and sign in again; it connects by itself.',
+        kind: 'err',
+      };
+    default:
+      return {
+        text: describeIalertProblem(null, res?.error) || 'Could not connect iALERT',
+        kind: 'err',
+      };
+  }
+}

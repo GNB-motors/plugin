@@ -12,6 +12,11 @@ import { createLogger } from './logger.js';
 import { getStorage, setStorage } from './utils.js';
 import { backendFetch } from './backendApi.js';
 import { createLayerLogger, LAYERS } from './telemetry.js';
+import {
+  ialertWaitingBanner,
+  ialertLinkedBanner,
+  ialertFailureBanner,
+} from '../shared/linkBanners.js';
 
 const logger = createLogger('IalertLink');
 const ialertTel = createLayerLogger(LAYERS.IALERT);
@@ -107,18 +112,21 @@ export async function linkIalertSession(session) {
         accountId: result.accountId,
         message,
         refreshRejected,
+        // false → the backend cannot renew this link on its own; the open
+        // iALERT tab must stay open to renew it (the banner says so).
+        refreshStored: Boolean(result?.refreshStored),
       };
     } catch (err) {
       // Check for specific error code
       if (err.code === 'IALERT_TOKEN_TOO_OLD') {
         logger.warn('iALERT token too old:', err.message);
         ialertTel.warn('iALERT token too old', { error: err.message });
-        return { success: false, error: err.message };
+        return { success: false, error: err.message, code: err.code };
       }
 
       logger.error('Failed to link iALERT session:', err.message);
       ialertTel.error('iALERT link failed', { error: err.message });
-      return { success: false, error: err.message };
+      return { success: false, error: err.message, code: err.code || null };
     }
   });
 }
@@ -217,4 +225,111 @@ export async function unlinkIalert(accountId) {
       return { success: false, error: err.message };
     }
   });
+}
+
+// ─── Connect button: use an iALERT tab the user already has ─────────────────
+// The extension may not list iALERT tabs by URL (no host permission), so each
+// iALERT page's reader reports its tab id (IALERT_TAB_READY) and we keep the
+// ids in session storage. Tab ids only — never a session or token.
+const IALERT_TABS_KEY = 'ialertTabIds';
+
+async function getTrackedIalertTabs() {
+  try {
+    const store = await chrome.storage.session.get([IALERT_TABS_KEY]);
+    return Array.isArray(store[IALERT_TABS_KEY]) ? store[IALERT_TABS_KEY] : [];
+  } catch {
+    return [];
+  }
+}
+
+async function setTrackedIalertTabs(ids) {
+  try {
+    await chrome.storage.session.set({ [IALERT_TABS_KEY]: ids });
+  } catch {
+    // session storage unavailable: Connect falls back to opening iALERT
+  }
+}
+
+/** An iALERT page loaded in this tab (newest last). */
+export async function trackIalertTab(tabId) {
+  if (!Number.isInteger(tabId)) return;
+  const ids = (await getTrackedIalertTabs()).filter((id) => id !== tabId);
+  ids.push(tabId);
+  await setTrackedIalertTabs(ids.slice(-10));
+}
+
+export async function untrackIalertTab(tabId) {
+  const ids = await getTrackedIalertTabs();
+  if (ids.includes(tabId)) await setTrackedIalertTabs(ids.filter((id) => id !== tabId));
+}
+
+async function sendBanner(tabId, banner) {
+  try {
+    await chrome.tabs.sendMessage(tabId, { type: 'GNB_BANNER', banner });
+  } catch {
+    // best effort: the popup still reports the outcome
+  }
+}
+
+async function focusTab(tabId) {
+  try {
+    await chrome.tabs.update(tabId, { active: true });
+    const tab = await chrome.tabs.get(tabId);
+    if (tab?.windowId != null) await chrome.windows.update(tab.windowId, { focused: true });
+  } catch {
+    // focusing is a convenience only
+  }
+}
+
+/**
+ * The popup's "Connect iALERT".
+ *   1. An iALERT tab already holds a fresh sign-in → link it now.
+ *   2. An iALERT tab is open but not signed in → bring it forward and say what to do.
+ *   3. Otherwise → open iALERT for the user to sign in (the sign-in links itself).
+ * @returns {Promise<{ success: boolean, state: 'LINKED'|'SIGN_IN_AGAIN'|'FAILED'|'WAITING',
+ *                     tab?: 'focused'|'opened', accountId?: string, error?: string,
+ *                     refreshStored?: boolean }>}
+ */
+export async function connectIalert() {
+  const ids = (await getTrackedIalertTabs()).slice().reverse(); // newest first
+  let waitingTab = null;
+  for (const tabId of ids) {
+    let reply;
+    try {
+      reply = await chrome.tabs.sendMessage(tabId, { type: 'READ_IALERT_SESSION' });
+    } catch {
+      await untrackIalertTab(tabId); // closed, navigated away or reloaded extension
+      continue;
+    }
+    if (reply?.session) {
+      const result = await linkIalertSession(reply.session);
+      if (result.success) {
+        await sendBanner(tabId, ialertLinkedBanner(result));
+        return {
+          success: true,
+          state: 'LINKED',
+          accountId: result.accountId,
+          refreshStored: result.refreshStored,
+        };
+      }
+      await sendBanner(tabId, ialertFailureBanner(result));
+      return {
+        success: false,
+        state: result.code === 'IALERT_TOKEN_TOO_OLD' ? 'SIGN_IN_AGAIN' : 'FAILED',
+        error: result.error,
+      };
+    }
+    if (waitingTab == null) waitingTab = tabId;
+  }
+
+  if (waitingTab != null) {
+    await focusTab(waitingTab);
+    await sendBanner(waitingTab, ialertWaitingBanner());
+    ialertTel.info('iALERT connect: waiting for sign-in on an open tab');
+    return { success: true, state: 'WAITING', tab: 'focused' };
+  }
+
+  const opened = await openIalertForSignIn();
+  if (!opened.success) return { success: false, state: 'FAILED', error: opened.error };
+  return { success: true, state: 'WAITING', tab: 'opened' };
 }

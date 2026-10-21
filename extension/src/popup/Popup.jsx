@@ -15,9 +15,11 @@ import {
   RowMenu,
 } from './ui.jsx';
 import { ago, until, minutesUntil } from './time.js';
+import { toastDurationMs } from './toast.js';
 
 const AUTO_REFRESH_MS = 30_000;
 const MARK_SRC = '/icons/icon48.png';
+const FLEETEDGE_URL = 'https://fleetedge.home.tatamotors/';
 
 // ── helpers ───────────────────────────────────────────────────────────────────
 function useNow(intervalMs = 30_000) {
@@ -187,16 +189,26 @@ function FleetEdgeCard({ accounts, pull, onAction, style }) {
       {accounts.length === 0 ? (
         <div className="prov-empty">
           <ol className="prov-steps">
-            <li>Open FleetEdge in a tab and sign in.</li>
-            <li>Come back here and press Connect.</li>
+            <li>Open FleetEdge and sign in.</li>
+            <li>Press Connect.</li>
+            <li>FleetEdge confirms, then closes by itself.</li>
           </ol>
-          <button
-            type="button"
-            className="btn btn--primary btn--block"
-            onClick={() => onAction('connectAccount')}
-          >
-            Connect FleetEdge
-          </button>
+          <div className="prov-actions">
+            <button
+              type="button"
+              className="btn btn--secondary"
+              onClick={() => onAction('openFleetEdge')}
+            >
+              Open FleetEdge
+            </button>
+            <button
+              type="button"
+              className="btn btn--primary"
+              onClick={() => onAction('connectAccount')}
+            >
+              Connect
+            </button>
+          </div>
         </div>
       ) : (
         <>
@@ -372,8 +384,11 @@ function LogsView({ logs, onAction }) {
       <div className="logs-list">
         {sorted.length === 0 ? (
           <div className="logs-empty">
+            <span className="logs-empty-icon" aria-hidden="true">
+              <IconList />
+            </span>
             <strong>Nothing logged yet</strong>
-            Syncs and errors will show up here.
+            <span>Syncs, connections and errors show up here.</span>
           </div>
         ) : (
           sorted.map((log, i) => (
@@ -552,7 +567,7 @@ export default function Popup() {
     setToast({ id: Date.now() + Math.random(), message, kind });
     toastTimer.current = setTimeout(() => {
       if (mountedRef.current) setToast(null);
-    }, 3000);
+    }, toastDurationMs(message));
   }, []);
 
   const refreshStatus = useCallback(async (signal) => {
@@ -645,22 +660,33 @@ export default function Popup() {
                   'Connected, but NO refresh token was captured — this account will die when its access token lapses. Reload FleetEdge, wait for the map to load, then connect again.',
                   'err'
                 );
-              } else if (res.sessionCleared) {
+              } else if (res.sessionClearing) {
                 showToast(
-                  'Connected ✓ — FleetEdge tab closed and signed out locally; log in again anytime.',
+                  `Connected ✓ ${plural(res.vehicleCount ?? 0, 'vehicle', 'vehicles')} syncing. The FleetEdge tab closes in a few seconds; you can sign in again any time.`,
                   'ok'
                 );
               } else {
-                showToast(`Connected ✓ (${res.vehicleCount ?? 0} vehicles)`, 'ok');
+                showToast(
+                  `Connected ✓ ${plural(res.vehicleCount ?? 0, 'vehicle', 'vehicles')} syncing.`,
+                  'ok'
+                );
               }
               await refreshStatus();
             } else if (res.needsTabPick) {
               // G-1: Background found multiple tabs — surface a chooser modal.
               setTabPicker({ choices: res.choices || [] });
               setTabPickerSelected(res.choices?.[0]?.tabId ?? null);
+            } else if (/No FleetEdge tab open/i.test(res.error || '')) {
+              showToast('Open FleetEdge and sign in first. Opening it for you now.', 'err');
+              await chrome.tabs.create({ url: FLEETEDGE_URL });
             } else {
               showToast(res.error || 'Connection failed', 'err');
             }
+            break;
+          }
+
+          case 'openFleetEdge': {
+            await chrome.tabs.create({ url: FLEETEDGE_URL });
             break;
           }
 
@@ -676,10 +702,15 @@ export default function Popup() {
             showToast('Reconnecting…');
             const res = await chrome.runtime.sendMessage({ type: 'RECONNECT_ACCOUNT', accountId });
             if (res.success) {
-              if (res.sessionCleared) {
+              if (res.sessionClearing) {
                 showToast(
-                  'Reconnected ✓ — FleetEdge tab closed and signed out locally; log in again anytime.',
+                  'Reconnected ✓ The FleetEdge tab closes in a few seconds; you can sign in again any time.',
                   'ok'
+                );
+              } else if (res.noRefreshToken) {
+                showToast(
+                  "Reconnected, but it can't renew itself. Sign out of FleetEdge, sign in again, wait for the map, then reconnect.",
+                  'err'
                 );
               } else {
                 showToast('Reconnected ✓', 'ok');
@@ -825,7 +856,7 @@ export default function Popup() {
   if (view === 'logs') {
     return (
       <div className="gnb-popup">
-        <div className="view-wrapper view-wrapper--enter-right">
+        <div className="view-wrapper view-wrapper--logs view-wrapper--enter-right">
           <LogsView logs={logs} onAction={onAction} />
         </div>
         <Toast toast={toast} />

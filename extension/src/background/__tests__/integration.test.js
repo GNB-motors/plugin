@@ -41,7 +41,11 @@ vi.stubGlobal('chrome', {
     setBadgeBackgroundColor: vi.fn(),
   },
   notifications: { create: vi.fn() },
-  tabs: { query: vi.fn(() => Promise.resolve([])), sendMessage: vi.fn() },
+  tabs: {
+    query: vi.fn(() => Promise.resolve([])),
+    sendMessage: vi.fn(),
+    onRemoved: { addListener: vi.fn() },
+  },
   permissions: { contains: vi.fn(() => Promise.resolve(true)) },
 });
 

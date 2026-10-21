@@ -4,6 +4,7 @@ import {
   ialertAccountName,
   ialertPlanNote,
   describeIalertProblem,
+  describeConnectResult,
 } from './ialertModel.js';
 import { IconPlus, IconRefresh, Pill, RowMenu } from './ui.jsx';
 import { ago } from './time.js';
@@ -87,14 +88,11 @@ export default function IalertSection({ showToast, confirm, style }) {
     setConnecting(true);
     try {
       const res = await chrome.runtime.sendMessage({ type: 'IALERT_ENABLE' });
-      if (res?.success) {
-        showToast('iALERT opened in a new tab. Sign in there and GNB connects by itself.', 'ok');
-        await refreshStatus();
-      } else {
-        showToast(res?.error || 'Could not open iALERT', 'err');
-      }
+      const { text, kind } = describeConnectResult(res);
+      showToast(text, kind);
+      if (res?.state === 'LINKED') await refreshStatus();
     } catch (err) {
-      showToast(err.message || 'Could not open iALERT', 'err');
+      showToast(err.message || 'Could not connect iALERT', 'err');
     } finally {
       setConnecting(false);
     }
@@ -130,6 +128,7 @@ export default function IalertSection({ showToast, confirm, style }) {
   const vehicles = accounts.reduce((n, a) => n + (a.vehicleCount ?? 0), 0);
   let sub = 'Not connected';
   if (loading && accounts.length === 0) sub = 'Checking…';
+  else if (error && accounts.length === 0) sub = 'Status unavailable';
   else if (accounts.length) {
     sub = `${plural(accounts.length, 'account', 'accounts')} · ${plural(vehicles, 'vehicle', 'vehicles')}`;
   }
@@ -155,8 +154,9 @@ export default function IalertSection({ showToast, confirm, style }) {
     body = (
       <div className="prov-empty">
         <ol className="prov-steps">
-          <li>Press Connect. iALERT opens in a new tab.</li>
-          <li>Sign in there. GNB connects within a few seconds.</li>
+          <li>Press Connect iALERT.</li>
+          <li>Sign in to iALERT.</li>
+          <li>iALERT confirms with a green note.</li>
         </ol>
         <button
           type="button"
@@ -164,8 +164,11 @@ export default function IalertSection({ showToast, confirm, style }) {
           onClick={handleConnect}
           disabled={connecting}
         >
-          {connecting ? 'Opening iALERT…' : 'Connect iALERT'}
+          {connecting ? 'Connecting…' : 'Connect iALERT'}
         </button>
+        <p className="prov-hint">
+          Signed in already? Connect uses that tab for 10 minutes after sign-in.
+        </p>
       </div>
     );
   } else {

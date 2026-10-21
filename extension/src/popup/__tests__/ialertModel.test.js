@@ -94,3 +94,51 @@ describe('describeIalertProblem', () => {
     expect(describeIalertProblem(null, '')).toMatch(/Press Retry/);
   });
 });
+
+describe('describeConnectResult (Connect iALERT button)', () => {
+  it('linked: says whether the iALERT tab can be closed', async () => {
+    const { describeConnectResult } = await import('../ialertModel.js');
+    expect(describeConnectResult({ success: true, state: 'LINKED', refreshStored: true })).toEqual({
+      text: 'iALERT connected ✓ You can close the iALERT tab.',
+      kind: 'ok',
+    });
+    expect(
+      describeConnectResult({ success: true, state: 'LINKED', refreshStored: false }).text
+    ).toMatch(/Keep the iALERT tab open/);
+  });
+
+  it('waiting: an existing tab vs a newly opened one', async () => {
+    const { describeConnectResult } = await import('../ialertModel.js');
+    expect(describeConnectResult({ success: true, state: 'WAITING', tab: 'focused' }).text).toMatch(
+      /your iALERT tab/
+    );
+    expect(describeConnectResult({ success: true, state: 'WAITING', tab: 'opened' }).text).toMatch(
+      /iALERT is open/
+    );
+  });
+
+  it('too old, failures and a dead worker are errors in plain words', async () => {
+    const { describeConnectResult } = await import('../ialertModel.js');
+    expect(describeConnectResult({ success: false, state: 'SIGN_IN_AGAIN' }).kind).toBe('err');
+    expect(
+      describeConnectResult({ success: false, state: 'FAILED', error: 'Failed to fetch' })
+    ).toEqual({
+      text: "Can't reach the GNB server. Check your internet, then press Retry.",
+      kind: 'err',
+    });
+    expect(describeConnectResult(undefined)).toEqual({
+      text: 'Something went wrong. Press Retry.',
+      kind: 'err',
+    });
+  });
+});
+
+describe('toastDurationMs', () => {
+  it('keeps short toasts at 3 s, long guidance longer, never past 9 s', async () => {
+    const { toastDurationMs } = await import('../toast.js');
+    expect(toastDurationMs('Signed out')).toBe(3000);
+    expect(toastDurationMs('x'.repeat(100))).toBe(6000);
+    expect(toastDurationMs('x'.repeat(1000))).toBe(9000);
+    expect(toastDurationMs(undefined)).toBe(3000);
+  });
+});
