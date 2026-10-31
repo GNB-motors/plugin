@@ -8,7 +8,10 @@ on:
 
 jobs:
   smoke:
-    runs-on: ubuntu-latest
+    # Pinned: ubuntu-latest is migrating to Ubuntu 26 (from 19 Oct 2026) and
+    # `playwright install --with-deps chromium` fails there (31 Oct, twice, at
+    # the install step, before the build). Move back once Playwright supports it.
+    runs-on: ubuntu-24.04
     defaults:
       run:
         working-directory: extension
