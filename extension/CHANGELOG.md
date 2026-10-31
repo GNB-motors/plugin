@@ -2,6 +2,18 @@
 
 ---
 
+## [2026-10-31] — branch: feat/popup-design-v2 (no version bump — presentation only)
+
+### Popup design v2: gradient brand, glass surfaces, a real dark theme
+
+- **Dark theme.** The popup now follows the OS colour scheme (`prefers-color-scheme: dark`). Before this, a dark-mode browser still got the light popup. Every colour goes through the token block at the top of the v2 layer, so the dark theme is one token swap.
+- **Look.** Indigo-to-violet gradient for the brand name, avatar, primary buttons, stat values and the sign-in heading. Frosted header and footer, glass provider cards that lift on hover, a slow aurora behind the glass, and softer status pills with a tinted ring.
+- **Motion.** A light sweep on primary-button hover, a gentle float on the sign-in mark, and a drifting aurora, on top of the existing card, row, menu and toast animations. The reduced-motion block still turns all of it off, and the aurora and the sweep are hidden too.
+- **Contrast.** Notices, inline alerts and the sign-in error take their ink and border colours from tokens, so they keep contrast in both themes. Focus rings gained a glow halo.
+- **Scope.** A single CSS layer appended to `src/popup/Popup.css`. No JSX, background, content-script, crypto or manifest changes. No remote fonts (MV3 CSP); the font stack is local.
+
+---
+
 ## [2026-10-20] — branch: feat/ialert-connector
 
 ### Added iALERT telematics support (P1–P5)

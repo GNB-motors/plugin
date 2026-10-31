@@ -1192,3 +1192,394 @@
     display: none;
   }
 }
+
+/* ═══════════════════════════════════════════════════════════════════════
+   Design layer v2 — gradient brand, glass surfaces, dark theme.
+   Presentation only: every rule below restyles an existing class. Colours
+   go through tokens so the dark theme is one token swap; the reduced-motion
+   block above already stops every animation declared here.
+   ═══════════════════════════════════════════════════════════════════════ */
+
+:root {
+  --accent: #4f46e5;
+  --accent-hover: #4338ca;
+  --accent-active: #3730a3;
+  --accent-ink: #3730a3;
+  --accent-tint: #eef2ff;
+  --accent-glow: rgba(99, 102, 241, 0.35);
+  --grad: linear-gradient(135deg, #4f46e5 0%, #7c3aed 55%, #0ea5e9 115%);
+  --grad-text: linear-gradient(120deg, #312e81 0%, #6d28d9 60%, #0369a1 110%);
+
+  --ok: #047857;
+  --ok-tint: #ecfdf5;
+  --ok-ring: rgba(5, 150, 105, 0.4);
+  --warn: #b45309;
+  --warn-tint: #fffbeb;
+  --warn-ink: #92400e;
+  --warn-line: #fde68a;
+  --warn-soft: #fef3c7;
+  --crit: #dc2626;
+  --crit-tint: #fef2f2;
+  --crit-ink: #991b1b;
+  --crit-line: #fecaca;
+  --crit-soft: #fee2e2;
+  --crit-strong: #b91c1c;
+  --muted: #64748b;
+  --muted-tint: #f1f5f9;
+
+  --bg: #f6f6fb;
+  --panel: rgba(255, 255, 255, 0.82);
+  --panel-solid: #ffffff;
+  --sunk: rgba(79, 70, 229, 0.05);
+  --line: rgba(15, 23, 42, 0.08);
+  --line-strong: rgba(15, 23, 42, 0.16);
+  --highlight: rgba(255, 255, 255, 0.9);
+  --skel-hi: rgba(79, 70, 229, 0.1);
+
+  --text: #0b0f1a;
+  --text-2: #334155;
+  --text-3: #64748b;
+
+  --toast-bg: rgba(15, 18, 36, 0.92);
+  --toast-ink: #f8fafc;
+  --backdrop: rgba(15, 23, 42, 0.42);
+  --aurora-a: rgba(99, 102, 241, 0.16);
+  --aurora-b: rgba(168, 85, 247, 0.12);
+  --aurora-c: rgba(14, 165, 233, 0.1);
+
+  --radius: 14px;
+  --radius-sm: 10px;
+  --shadow: 0 1px 1px rgba(15, 23, 42, 0.04), 0 10px 24px -14px rgba(30, 27, 75, 0.22);
+  --shadow-lift: 0 2px 4px rgba(15, 23, 42, 0.05), 0 16px 32px -14px rgba(30, 27, 75, 0.3);
+  --font: "Inter", "DM Sans", "Segoe UI", system-ui, -apple-system, sans-serif;
+}
+
+@media (prefers-color-scheme: dark) {
+  :root {
+    --accent: #818cf8;
+    --accent-hover: #a5b4fc;
+    --accent-active: #6366f1;
+    --accent-ink: #c7d2fe;
+    --accent-tint: rgba(129, 140, 248, 0.14);
+    --accent-glow: rgba(129, 140, 248, 0.4);
+    --grad: linear-gradient(135deg, #6366f1 0%, #8b5cf6 55%, #22d3ee 115%);
+    --grad-text: linear-gradient(120deg, #e0e7ff 0%, #c4b5fd 55%, #67e8f9 110%);
+
+    --ok: #34d399;
+    --ok-tint: rgba(52, 211, 153, 0.12);
+    --ok-ring: rgba(52, 211, 153, 0.45);
+    --warn: #fbbf24;
+    --warn-tint: rgba(251, 191, 36, 0.1);
+    --warn-ink: #fde68a;
+    --warn-line: rgba(251, 191, 36, 0.3);
+    --warn-soft: rgba(251, 191, 36, 0.18);
+    --crit: #f87171;
+    --crit-tint: rgba(248, 113, 113, 0.1);
+    --crit-ink: #fecaca;
+    --crit-line: rgba(248, 113, 113, 0.32);
+    --crit-soft: rgba(248, 113, 113, 0.18);
+    --crit-strong: #ef4444;
+    --muted: #94a3b8;
+    --muted-tint: rgba(148, 163, 184, 0.12);
+
+    --bg: #07080f;
+    --panel: rgba(22, 24, 42, 0.72);
+    --panel-solid: #12142a;
+    --sunk: rgba(255, 255, 255, 0.045);
+    --line: rgba(255, 255, 255, 0.08);
+    --line-strong: rgba(255, 255, 255, 0.16);
+    --highlight: rgba(255, 255, 255, 0.06);
+    --skel-hi: rgba(255, 255, 255, 0.09);
+
+    --text: #eef0ff;
+    --text-2: #c7cbe0;
+    --text-3: #8d92b0;
+
+    --toast-bg: rgba(30, 33, 58, 0.94);
+    --toast-ink: #eef0ff;
+    --backdrop: rgba(0, 0, 0, 0.55);
+    --aurora-a: rgba(99, 102, 241, 0.26);
+    --aurora-b: rgba(168, 85, 247, 0.2);
+    --aurora-c: rgba(34, 211, 238, 0.14);
+
+    --shadow: inset 0 1px 0 var(--highlight), 0 14px 32px -18px rgba(0, 0, 0, 0.7);
+    --shadow-lift: inset 0 1px 0 var(--highlight), 0 20px 40px -18px rgba(0, 0, 0, 0.8);
+    color-scheme: dark;
+  }
+}
+
+/* ─── shell: a slow aurora behind the glass ─────────────────────────── */
+.gnb-popup::before {
+  content: "";
+  position: absolute;
+  inset: -40% -30% auto -30%;
+  height: 120%;
+  z-index: -1;
+  pointer-events: none;
+  background: radial-gradient(40% 35% at 20% 25%, var(--aurora-a), transparent 70%),
+    radial-gradient(35% 30% at 80% 15%, var(--aurora-b), transparent 70%),
+    radial-gradient(45% 35% at 60% 70%, var(--aurora-c), transparent 70%);
+  filter: blur(8px);
+  animation: gnb-aurora 22s ease-in-out infinite alternate;
+}
+@keyframes gnb-aurora {
+  from {
+    transform: translate3d(0, 0, 0) rotate(0deg);
+  }
+  to {
+    transform: translate3d(4%, 6%, 0) rotate(8deg);
+  }
+}
+.gnb-popup :focus-visible {
+  outline: 2px solid var(--accent);
+  outline-offset: 2px;
+  box-shadow: 0 0 0 4px var(--accent-glow);
+}
+
+/* ─── header: frosted bar with a gradient hairline ──────────────────── */
+.gnb-header {
+  position: relative;
+  background: color-mix(in srgb, var(--panel-solid) 70%, transparent);
+  backdrop-filter: blur(16px) saturate(150%);
+  -webkit-backdrop-filter: blur(16px) saturate(150%);
+  border-bottom: 1px solid transparent;
+}
+.gnb-header::after {
+  content: "";
+  position: absolute;
+  left: 0;
+  right: 0;
+  bottom: -1px;
+  height: 1px;
+  background: linear-gradient(90deg, transparent, var(--accent-glow), transparent);
+}
+.gnb-mark {
+  box-shadow: 0 6px 16px -6px var(--accent-glow);
+}
+.gnb-brand-name {
+  background: var(--grad-text);
+  -webkit-background-clip: text;
+  background-clip: text;
+  color: transparent;
+}
+.gnb-avatar {
+  background: var(--grad);
+  box-shadow: 0 0 0 2px var(--panel-solid), 0 0 0 3px var(--accent-glow);
+}
+.gnb-icon-btn {
+  background: var(--panel);
+  border-color: var(--line);
+  transition: background 0.15s var(--ease), color 0.15s var(--ease), transform 0.15s var(--ease);
+}
+.gnb-icon-btn:hover {
+  transform: translateY(-1px);
+}
+
+/* ─── glass cards ────────────────────────────────────────────────────── */
+.prov,
+.stats {
+  background: var(--panel);
+  border: 1px solid var(--line);
+  backdrop-filter: blur(14px) saturate(140%);
+  -webkit-backdrop-filter: blur(14px) saturate(140%);
+  box-shadow: var(--shadow);
+  transition: box-shadow 0.2s var(--ease), transform 0.2s var(--ease), border-color 0.2s var(--ease);
+}
+@media (hover: hover) {
+  .prov:hover,
+  .stats:hover {
+    transform: translateY(-1px);
+    box-shadow: var(--shadow-lift);
+    border-color: var(--line-strong);
+  }
+}
+.prov-foot {
+  background: var(--sunk);
+}
+.prov-logo {
+  box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.25), 0 6px 14px -8px rgba(0, 0, 0, 0.45);
+}
+.stat-value {
+  background: var(--grad-text);
+  -webkit-background-clip: text;
+  background-clip: text;
+  color: transparent;
+}
+.stat--warn .stat-value,
+.stat--crit .stat-value {
+  background: none;
+}
+.stat--warn .stat-value {
+  color: var(--warn);
+}
+.stat--crit .stat-value {
+  color: var(--crit);
+}
+
+/* ─── status pills ───────────────────────────────────────────────────── */
+.pill {
+  box-shadow: inset 0 0 0 1px color-mix(in srgb, currentColor 18%, transparent);
+}
+@keyframes ring-expand {
+  0% {
+    box-shadow: 0 0 0 0 var(--ok-ring);
+  }
+  100% {
+    box-shadow: 0 0 0 5px transparent;
+  }
+}
+
+/* ─── buttons ────────────────────────────────────────────────────────── */
+.btn {
+  position: relative;
+  overflow: hidden;
+  transition:
+    background 0.15s var(--ease), border-color 0.15s var(--ease), color 0.15s var(--ease),
+    transform 80ms var(--ease), box-shadow 0.2s var(--ease);
+}
+.btn--primary {
+  background: var(--grad);
+  background-size: 160% 100%;
+  background-position: 0% 0;
+  color: #fff;
+  box-shadow: 0 8px 18px -10px var(--accent-glow), inset 0 1px 0 rgba(255, 255, 255, 0.22);
+}
+.btn--primary:hover:not(:disabled) {
+  background: var(--grad);
+  background-size: 160% 100%;
+  background-position: 100% 0;
+  box-shadow: 0 10px 22px -10px var(--accent-glow), inset 0 1px 0 rgba(255, 255, 255, 0.28);
+}
+.btn--primary:active:not(:disabled) {
+  background: var(--grad);
+  background-size: 160% 100%;
+}
+.btn--primary::after {
+  content: "";
+  position: absolute;
+  top: 0;
+  bottom: 0;
+  left: -60%;
+  width: 40%;
+  background: linear-gradient(100deg, transparent, rgba(255, 255, 255, 0.35), transparent);
+  transform: skewX(-18deg);
+  pointer-events: none;
+}
+.btn--primary:hover:not(:disabled)::after {
+  animation: gnb-shine 0.9s var(--ease);
+}
+@keyframes gnb-shine {
+  to {
+    left: 130%;
+  }
+}
+.btn--secondary {
+  background: var(--panel);
+  border-color: var(--line-strong);
+}
+.btn--danger:hover:not(:disabled) {
+  background: var(--crit-strong);
+}
+.btn--crit-soft:hover:not(:disabled) {
+  background: var(--crit-soft);
+}
+.btn--warn-soft:hover:not(:disabled) {
+  background: var(--warn-soft);
+}
+
+/* ─── menu, notices, alerts ──────────────────────────────────────────── */
+.menu {
+  background: var(--panel-solid);
+  border-color: var(--line);
+  box-shadow: var(--shadow-lift);
+}
+.notice--crit {
+  border-color: var(--crit-line);
+  color: var(--crit-ink);
+}
+.notice--warn {
+  border-color: var(--warn-line);
+  color: var(--warn-ink);
+}
+.inline-alert,
+.login-error {
+  color: var(--crit-ink);
+}
+.skel span {
+  background: linear-gradient(90deg, var(--sunk), var(--skel-hi), var(--sunk));
+  background-size: 200% 100%;
+}
+
+/* ─── toast & modal ──────────────────────────────────────────────────── */
+.toast {
+  background: var(--toast-bg);
+  color: var(--toast-ink);
+  backdrop-filter: blur(12px);
+  -webkit-backdrop-filter: blur(12px);
+  border: 1px solid rgba(255, 255, 255, 0.08);
+}
+.toast--ok .toast-dot {
+  background: #34d399;
+  box-shadow: 0 0 10px rgba(52, 211, 153, 0.7);
+}
+.toast--err .toast-dot {
+  background: #f87171;
+  box-shadow: 0 0 10px rgba(248, 113, 113, 0.7);
+}
+.modal-backdrop {
+  background: var(--backdrop);
+  backdrop-filter: blur(4px);
+  -webkit-backdrop-filter: blur(4px);
+}
+.modal {
+  background: var(--panel-solid);
+  border: 1px solid var(--line);
+  box-shadow: var(--shadow-lift);
+}
+
+/* ─── footer ─────────────────────────────────────────────────────────── */
+.gnb-footer {
+  background: color-mix(in srgb, var(--panel-solid) 72%, transparent);
+  backdrop-filter: blur(16px);
+  -webkit-backdrop-filter: blur(16px);
+}
+
+/* ─── sign-in ────────────────────────────────────────────────────────── */
+.login-head .gnb-mark {
+  box-shadow: 0 0 0 6px var(--accent-tint), 0 16px 36px -10px var(--accent-glow);
+  animation: gnb-float 6s ease-in-out infinite;
+}
+@keyframes gnb-float {
+  0%,
+  100% {
+    transform: translateY(0);
+  }
+  50% {
+    transform: translateY(-4px);
+  }
+}
+.login-head h1 {
+  background: var(--grad-text);
+  -webkit-background-clip: text;
+  background-clip: text;
+  color: transparent;
+}
+.field input {
+  background: var(--panel);
+  border-color: var(--line-strong);
+  color: var(--text);
+  transition: border-color 0.15s var(--ease), box-shadow 0.2s var(--ease), background 0.15s
+    var(--ease);
+}
+.field input:focus {
+  border-color: var(--accent);
+  box-shadow: 0 0 0 4px var(--accent-glow);
+  background: var(--panel-solid);
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .gnb-popup::before,
+  .btn--primary::after {
+    display: none;
+  }
+}
