@@ -40,3 +40,12 @@ export function minutesUntil(input, now = Date.now()) {
   const t = toTime(input);
   return t == null ? null : Math.floor((t - now) / 60000);
 }
+
+/**
+ * Whole days until `input` (negative once past); null when unknown. Used for the
+ * FleetEdge re-link date, which is ~90 days out and fixed at login.
+ */
+export function daysUntil(input, now = Date.now()) {
+  const t = toTime(input);
+  return t == null ? null : Math.floor((t - now) / 86400000);
+}

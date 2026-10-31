@@ -14,7 +14,7 @@ import {
   Pill,
   RowMenu,
 } from './ui.jsx';
-import { ago, until, minutesUntil } from './time.js';
+import { ago, until, minutesUntil, daysUntil } from './time.js';
 import { toastDurationMs } from './toast.js';
 
 const AUTO_REFRESH_MS = 30_000;
@@ -72,6 +72,11 @@ function FleetEdgeAccountRow({ account, onAction, style }) {
 
   const synced = ago(account.lastPullAt, now);
   const mins = minutesUntil(account.expiresAt, now);
+  // The refresh chain ends ~90 days after login; after that someone has to sign
+  // in to FleetEdge again. Shown only in the last 30 days, never guessed.
+  const relinkDays = daysUntil(account.refreshExpiresAt, now);
+  const relinkSoon =
+    status === 'linked' && relinkDays != null && relinkDays >= 0 && relinkDays <= 30;
 
   return (
     <div className="acc" style={style}>
@@ -104,6 +109,16 @@ function FleetEdgeAccountRow({ account, onAction, style }) {
               ? ` · synced ${synced}`
               : ''}
         </div>
+        {relinkSoon && (
+          <div
+            className={`acc-note ${relinkDays <= 3 ? 'acc-note--crit' : relinkDays <= 14 ? 'acc-note--warn' : ''}`}
+            title="FleetEdge sign-ins last about 90 days. Sign in again before then to keep syncing."
+          >
+            {relinkDays === 0
+              ? 'Sign in to FleetEdge again today'
+              : `Sign in to FleetEdge again within ${relinkDays} ${relinkDays === 1 ? 'day' : 'days'}`}
+          </div>
+        )}
       </div>
       <div className="acc-side">
         {status === 'linked' && <Pill tone="ok">Connected</Pill>}

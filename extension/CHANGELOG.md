@@ -10,7 +10,8 @@
 - **Look.** Indigo-to-violet gradient for the brand name, avatar, primary buttons, stat values and the sign-in heading. Frosted header and footer, glass provider cards that lift on hover, a slow aurora behind the glass, and softer status pills with a tinted ring.
 - **Motion.** A light sweep on primary-button hover, a gentle float on the sign-in mark, and a drifting aurora, on top of the existing card, row, menu and toast animations. The reduced-motion block still turns all of it off, and the aurora and the sweep are hidden too.
 - **Contrast.** Notices, inline alerts and the sign-in error take their ink and border colours from tokens, so they keep contrast in both themes. Focus rings gained a glow halo.
-- **Scope.** A single CSS layer appended to `src/popup/Popup.css`. No JSX, background, content-script, crypto or manifest changes. No remote fonts (MV3 CSP); the font stack is local.
+- **Re-link countdown.** Each FleetEdge account row says "Sign in to FleetEdge again within N days" in the last 30 days before its ~90-day sign-in ends (amber at ≤14, red at ≤3). It reads `refreshExpiresAt` from `/extension/fleetedge/status` (backend PR #325) and shows nothing when the date is unknown. `daysUntil()` in `popup/time.js` has its own tests.
+- **Scope.** The visual layer is a single CSS block appended to `src/popup/Popup.css`; the re-link note is the only JSX change. No background, content-script, crypto or manifest changes. No remote fonts (MV3 CSP); the font stack is local.
 
 ---
 
